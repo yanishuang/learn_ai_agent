@@ -55,6 +55,8 @@
 
 ## 第 1 章：AI Agent 全景与学习路线
 
+详细学习文档：[第 1 章：AI Agent 全景与学习路线](chapters/01-ai-agent-overview.md)
+
 ### 学习目标
 
 - 区分 Chatbot、RAG 应用、Workflow、Agent、多 Agent。
