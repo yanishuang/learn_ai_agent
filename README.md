@@ -83,6 +83,8 @@
 
 ## 第 2 章：大模型应用基础
 
+详细学习文档：[第 2 章：大模型应用基础](chapters/02-llm-application-basics.md)
+
 ### 学习目标
 
 - 掌握模型调用、消息格式、结构化输出、流式响应。
@@ -110,6 +112,8 @@
 
 ## 第 3 章：Prompt Engineering 与 Context Engineering
 
+详细学习文档：[第 3 章：Prompt Engineering 与 Context Engineering](chapters/03-prompt-and-context-engineering.md)
+
 ### 学习目标
 
 - 从“写提示词”升级到“管理上下文”。
@@ -136,6 +140,8 @@
 
 ## 第 4 章：Spring AI 与 LangChain4j 入门
 
+详细学习文档：[第 4 章：Spring AI 与 LangChain4j 入门](chapters/04-spring-ai-and-langchain4j.md)
+
 ### 学习目标
 
 - 掌握 Java 生态下构建 AI 应用的两条常见路线。
@@ -161,6 +167,8 @@
 - [LangChain4j Tutorials](https://docs.langchain4j.dev/category/tutorials/)
 
 ## 第 5 章：Tool Calling / Function Calling
+
+详细学习文档：[第 5 章：Tool Calling / Function Calling](chapters/05-tool-calling.md)
 
 ### 学习目标
 
