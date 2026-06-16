@@ -1,9 +1,9 @@
 # 第 2 章：大模型应用基础
 
-更新时间：2026-06-03  
+更新时间：2026-06-16  
 建议学习时间：3-5 天  
 适合阶段：已经理解 AI Agent 全景，准备开始动手调用大模型  
-本章产出：一个 Spring Boot 大模型问答 API、一个结构化输出接口、一个 SSE 流式响应接口、一份调用日志与错误处理清单
+本章产出：一个 FastAPI 大模型问答 API、一个结构化输出接口、一个 SSE 流式响应接口、一份调用日志与错误处理清单
 
 ## 2.1 本章学习目标
 
@@ -12,9 +12,9 @@
 1. 解释大模型应用的一次完整调用链路。
 2. 区分 system、user、assistant、tool 消息的职责。
 3. 理解 temperature、top_p、max tokens、上下文窗口、流式输出的作用。
-4. 使用 Spring AI `ChatClient` 完成一次基础模型调用。
-5. 让模型按固定 JSON 结构返回结果。
-6. 使用 SSE 把模型输出实时推送给前端。
+4. 使用 Python + OpenAI SDK 完成一次基础模型调用。
+5. 使用 Pydantic 校验模型结构化输出。
+6. 使用 FastAPI + SSE 把模型输出实时推送给前端。
 7. 为模型调用增加基础错误处理、超时、日志和成本意识。
 8. 知道哪些参数和输出不能盲目信任。
 
@@ -28,9 +28,9 @@
 大模型调用链路
   -> 消息结构
   -> 模型参数
-  -> Spring AI ChatClient
-  -> 普通问答 API
-  -> 结构化输出
+  -> Python OpenAI SDK
+  -> FastAPI 普通问答 API
+  -> Pydantic 结构化输出
   -> SSE 流式响应
   -> 错误处理与日志
 ```
@@ -43,12 +43,13 @@
 
 ```mermaid
 flowchart LR
-    User["用户输入"] --> Controller["Controller 接口"]
-    Controller --> Service["AI Service"]
+    User["用户输入"] --> API["FastAPI 接口"]
+    API --> Service["AI Service"]
     Service --> Prompt["组装消息 / Prompt"]
     Prompt --> Model["模型服务"]
     Model --> Parse["解析响应"]
-    Parse --> Log["记录日志"]
+    Parse --> Validate["Pydantic 校验"]
+    Validate --> Log["记录日志"]
     Log --> Response["返回前端"]
 ```
 
@@ -63,30 +64,6 @@ flowchart LR
 - token 与费用统计。
 - 审计日志。
 
-### 最小请求示例
-
-用户输入：
-
-```text
-请用 3 句话解释什么是 RAG。
-```
-
-后端要做的事情：
-
-1. 接收用户问题。
-2. 加入系统约束，例如“你是 AI 学习助手”。
-3. 调用模型。
-4. 读取模型响应。
-5. 返回答案。
-
-### 最小响应示例
-
-```json
-{
-  "answer": "RAG 是检索增强生成，用来让大模型基于外部资料回答问题。它通常先从知识库检索相关内容，再把内容交给模型生成答案。这样可以减少幻觉，并让回答可以追溯到资料来源。"
-}
-```
-
 ## 2.4 消息角色：System、User、Assistant、Tool
 
 大模型对话通常不是只传一段字符串，而是传一组消息。不同角色有不同职责。
@@ -98,47 +75,7 @@ flowchart LR
 | assistant | 模型之前的回答 | MCP 是一种工具和上下文接入协议 |
 | tool | 工具调用结果 | 搜索知识库返回了 5 条结果 |
 
-### System 消息
-
-System 消息用于定义长期规则。它应该写清楚：
-
-- 模型扮演什么角色。
-- 可以做什么。
-- 不能做什么。
-- 如何处理不确定信息。
-- 输出格式是什么。
-
-示例：
-
-```text
-你是 AI Agent 课程助教。
-请用准确、清晰、适合初学者的方式回答。
-如果你不确定，请明确说“不确定”，不要编造。
-回答中优先使用课程中的术语：RAG、Workflow、Agent、MCP。
-```
-
-### User 消息
-
-User 消息是用户的本次输入。它通常包含：
-
-- 问题。
-- 任务目标。
-- 上传文件的摘要。
-- 额外约束。
-
-示例：
-
-```text
-请比较 RAG 和 Agent 的区别，并给一个企业应用例子。
-```
-
-### Assistant 消息
-
-Assistant 消息通常来自历史对话，用于保持上下文。它不应该无限制塞入请求里，否则会浪费 token 并引入旧信息干扰。
-
-### Tool 消息
-
-Tool 消息在第 5 章会详细学习。本章先记住：工具结果必须来自后端真实执行，不应该让模型自己假装调用了工具。
+本章先使用 system + user 完成最小调用。Tool 消息会在第 5 章详细学习。
 
 ## 2.5 模型参数：先理解影响结果的旋钮
 
@@ -149,81 +86,71 @@ Tool 消息在第 5 章会详细学习。本章先记住：工具结果必须来
 | model | 选择使用哪个模型 | 根据任务复杂度、成本、速度选择 |
 | temperature | 控制随机性 | 问答/结构化任务偏低，创意任务可适当提高 |
 | top_p | 控制采样范围 | 通常不要和 temperature 同时大幅调整 |
-| max_tokens | 限制最大输出长度 | 根据输出需求设置，避免无限生成 |
-| stop | 停止生成标记 | 特定格式任务可用 |
+| max_output_tokens | 限制最大输出长度 | 根据输出需求设置，避免无限生成 |
 | stream | 是否流式返回 | 长回答、聊天体验、任务进度建议开启 |
-| response_format / schema | 输出格式约束 | 结构化输出任务应使用 |
+| response schema | 输出格式约束 | 结构化输出任务应使用，并由后端校验 |
 
-### 参数建议
+模型名称、参数名和可用能力会随平台演进变化。实际项目要以当前账号和官方文档为准，不要把课程里的模型名写死成不可配置常量。
 
-| 场景 | temperature | 说明 |
-| --- | --- | --- |
-| 企业知识库问答 | 0-0.3 | 要求稳定、少发散 |
-| 数据分析摘要 | 0.2-0.5 | 允许表达变化，但不能编造 |
-| 写营销文案 | 0.6-0.9 | 需要创意 |
-| 结构化 JSON 输出 | 0-0.2 | 越稳定越好 |
-| 代码生成 | 0.1-0.4 | 兼顾稳定和修正能力 |
+## 2.6 Python 项目骨架建议
 
-### 上下文窗口
-
-上下文窗口指模型一次请求能看到的最大内容长度。它包括：
-
-- system prompt。
-- 用户问题。
-- 历史对话。
-- 检索资料。
-- 工具返回。
-- 模型要生成的答案。
-
-初学者常犯的错误是把所有历史记录和所有文档都塞进上下文。正确做法是：
-
-- 只放本次任务需要的信息。
-- 长历史先摘要。
-- 文档用 RAG 检索后再放。
-- 工具结果要压缩成结构化摘要。
-
-## 2.6 Spring Boot 项目骨架建议
-
-本章建议先用 Spring Boot 做一个最小服务。目录可以这样设计：
+本章建议先用 FastAPI 做一个最小服务。目录可以这样设计：
 
 ```text
-src/main/java/com/example/agentcourse/
-  AgentCourseApplication.java
-  ai/
-    AiChatController.java
-    AiChatService.java
-    dto/
-      ChatRequest.java
-      ChatResponse.java
-      LessonAnswer.java
-  config/
-    AiProperties.java
+agent-course/
+  pyproject.toml
+  .env.example
+  app/
+    main.py
+    settings.py
+    ai/
+      client.py
+      schemas.py
+      service.py
+    api/
+      routes.py
+    observability/
+      logging.py
 ```
+
+### 依赖建议
+
+```bash
+uv init agent-course
+cd agent-course
+uv add fastapi uvicorn openai pydantic pydantic-settings python-dotenv
+```
+
+不用 `uv` 也可以使用 `pip` 或 Poetry。关键不是工具，而是把依赖、配置、代码和测试分清楚。
 
 ### 配置原则
 
 不要把 API Key 写进代码或提交到仓库。
 
-推荐使用环境变量：
+`.env.example`：
 
 ```text
-OPENAI_API_KEY=你的密钥
+OPENAI_API_KEY=your_api_key
+OPENAI_MODEL=gpt-4.1-mini
+REQUEST_TIMEOUT_SECONDS=60
 ```
 
-`application.yml` 示例：
+`app/settings.py`：
 
-```yaml
-spring:
-  ai:
-    openai:
-      api-key: ${OPENAI_API_KEY}
-      chat:
-        options:
-          model: gpt-4.1-mini
-          temperature: 0.2
+```python
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    openai_api_key: str
+    openai_model: str = "gpt-4.1-mini"
+    request_timeout_seconds: int = 60
+
+
+settings = Settings()
 ```
-
-模型名会随时间变化，实际项目要以官方文档和你当前账号可用模型为准。
 
 ## 2.7 实践一：普通问答 API
 
@@ -253,173 +180,205 @@ POST /api/ai/chat
 
 ### DTO 设计
 
-```java
-package com.example.agentcourse.ai.dto;
+`app/ai/schemas.py`：
 
-public record ChatRequest(
-    String message
-) {
-}
+```python
+from pydantic import BaseModel, Field
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+
+
+class ChatResponse(BaseModel):
+    answer: str
 ```
 
-```java
-package com.example.agentcourse.ai.dto;
+### OpenAI Client
 
-public record ChatResponse(
-    String answer
-) {
-}
+`app/ai/client.py`：
+
+```python
+from openai import AsyncOpenAI
+
+from app.settings import settings
+
+
+client = AsyncOpenAI(
+    api_key=settings.openai_api_key,
+    timeout=settings.request_timeout_seconds,
+)
 ```
 
 ### Service 示例
 
-```java
-package com.example.agentcourse.ai;
+`app/ai/service.py`：
 
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Service;
+```python
+from app.ai.client import client
+from app.settings import settings
 
-@Service
-public class AiChatService {
 
-    private final ChatClient chatClient;
+SYSTEM_PROMPT = """
+你是 AI Agent 课程助教。
+请用准确、清晰、适合初学者的方式回答。
+如果你不确定，请明确说“不确定”，不要编造。
+回答中优先使用课程中的术语：RAG、Workflow、Agent、MCP。
+""".strip()
 
-    public AiChatService(ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder
-            .defaultSystem("""
-                你是 AI Agent 课程助教。
-                请用准确、清晰、适合初学者的中文回答。
-                如果不确定，请明确说明，不要编造。
-                """)
-            .build();
-    }
 
-    public String chat(String message) {
-        return chatClient.prompt()
-            .user(message)
-            .call()
-            .content();
-    }
-}
+async def chat(message: str) -> str:
+    response = await client.responses.create(
+        model=settings.openai_model,
+        input=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": message},
+        ],
+        temperature=0.2,
+    )
+    return response.output_text
 ```
 
-### Controller 示例
+### Route 示例
 
-```java
-package com.example.agentcourse.ai;
+`app/api/routes.py`：
 
-import com.example.agentcourse.ai.dto.ChatRequest;
-import com.example.agentcourse.ai.dto.ChatResponse;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+```python
+from fastapi import APIRouter
 
-@RestController
-@RequestMapping("/api/ai")
-public class AiChatController {
+from app.ai.schemas import ChatRequest, ChatResponse
+from app.ai.service import chat
 
-    private final AiChatService aiChatService;
+router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-    public AiChatController(AiChatService aiChatService) {
-        this.aiChatService = aiChatService;
-    }
 
-    @PostMapping("/chat")
-    public ChatResponse chat(@RequestBody ChatRequest request) {
-        String answer = aiChatService.chat(request.message());
-        return new ChatResponse(answer);
-    }
-}
+@router.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest) -> ChatResponse:
+    answer = await chat(request.message)
+    return ChatResponse(answer=answer)
+```
+
+`app/main.py`：
+
+```python
+from fastapi import FastAPI
+
+from app.api.routes import router
+
+app = FastAPI(title="AI Agent Course")
+app.include_router(router)
 ```
 
 ### 验收方式
 
-用 curl 测试：
+启动服务：
 
 ```bash
-curl -X POST http://localhost:8080/api/ai/chat \
+uvicorn app.main:app --reload
+```
+
+调用接口：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/ai/chat \
   -H 'Content-Type: application/json' \
   -d '{"message":"请用三句话解释什么是 RAG"}'
 ```
 
-你应该看到一个中文回答。
+能得到中文回答，即完成本章第一个目标。
 
 ## 2.8 实践二：结构化输出
 
 ### 为什么需要结构化输出
 
-企业应用不能只拿到一段自然语言。很多时候需要固定字段，例如：
+企业应用不能只拿一段自然语言。很多场景需要：
 
-- 答案。
-- 置信度。
-- 风险级别。
-- 下一步建议。
-- 引用来源。
-- 是否需要人工确认。
+- 前端渲染字段。
+- 后端保存结果。
+- 后续流程判断。
+- 自动评估回答质量。
 
-结构化输出能让后端更容易处理模型结果。
+所以模型输出必须经过后端校验。
 
 ### 输出对象设计
 
-```java
-package com.example.agentcourse.ai.dto;
+在 `app/ai/schemas.py` 追加：
 
-import java.util.List;
+```python
+from typing import Literal
 
-public record LessonAnswer(
-    String answer,
-    String concept,
-    String difficulty,
-    List<String> keyPoints,
-    List<String> nextSteps
-) {
-}
+
+class Citation(BaseModel):
+    source: str
+    quote: str
+
+
+class LessonAnswer(BaseModel):
+    answer: str
+    confidence: Literal["high", "medium", "low"]
+    citations: list[Citation] = Field(default_factory=list)
+    missing_info: str | None = None
 ```
 
 ### Service 示例
 
-```java
-package com.example.agentcourse.ai;
+先让模型输出 JSON，再用 Pydantic 校验。第 6 章进入 RAG 后，`citations` 应该来自真实检索结果，而不是模型自由编造。
 
-import com.example.agentcourse.ai.dto.LessonAnswer;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Service;
+```python
+import json
 
-@Service
-public class LessonAnswerService {
+from pydantic import ValidationError
 
-    private final ChatClient chatClient;
+from app.ai.client import client
+from app.ai.schemas import LessonAnswer
+from app.settings import settings
 
-    public LessonAnswerService(ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder
-            .defaultSystem("""
-                你是 AI Agent 课程助教。
-                请把回答组织成结构化学习建议。
-                difficulty 只能取：beginner、intermediate、advanced。
-                """)
-            .build();
-    }
 
-    public LessonAnswer explain(String question) {
-        return chatClient.prompt()
-            .user(question)
-            .call()
-            .entity(LessonAnswer.class);
-    }
-}
+STRUCTURED_PROMPT = """
+你是 AI Agent 课程助教。
+请回答用户问题，并只返回 JSON。
+
+JSON 字段：
+- answer: 字符串，直接回答
+- confidence: high、medium、low 之一
+- citations: 数组，当前没有检索资料时返回空数组
+- missing_info: 字符串或 null，说明还缺什么信息
+
+不要输出 Markdown，不要输出 JSON 以外的解释。
+""".strip()
+
+
+async def structured_chat(message: str) -> LessonAnswer:
+    response = await client.responses.create(
+        model=settings.openai_model,
+        input=[
+            {"role": "system", "content": STRUCTURED_PROMPT},
+            {"role": "user", "content": message},
+        ],
+        temperature=0.1,
+    )
+    try:
+        payload = json.loads(response.output_text)
+        return LessonAnswer.model_validate(payload)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise ValueError(f"模型结构化输出校验失败: {exc}") from exc
 ```
 
-### Controller 示例
+### Route 示例
 
-```java
-@PostMapping("/lesson-answer")
-public LessonAnswer lessonAnswer(@RequestBody ChatRequest request) {
-    return lessonAnswerService.explain(request.message());
-}
+```python
+from app.ai.schemas import ChatRequest, ChatResponse, LessonAnswer
+from app.ai.service import chat, structured_chat
+
+
+@router.post("/structured", response_model=LessonAnswer)
+async def structured_endpoint(request: ChatRequest) -> LessonAnswer:
+    return await structured_chat(request.message)
 ```
 
-### 测试输入
+### 验收标准
+
+输入：
 
 ```json
 {
@@ -427,398 +386,257 @@ public LessonAnswer lessonAnswer(@RequestBody ChatRequest request) {
 }
 ```
 
-### 期望输出
+输出应该符合：
 
 ```json
 {
-  "answer": "Tool Calling 是让模型选择并调用外部工具的机制...",
-  "concept": "Tool Calling",
-  "difficulty": "beginner",
-  "keyPoints": [
-    "模型本身不直接执行工具",
-    "后端负责执行工具并返回结果",
-    "工具参数必须校验"
-  ],
-  "nextSteps": [
-    "先学习普通模型调用",
-    "再实现一个查询类工具"
-  ]
+  "answer": "...",
+  "confidence": "high",
+  "citations": [],
+  "missing_info": null
 }
 ```
 
-### 结构化输出注意事项
-
-- 字段名要清楚。
-- 枚举值要限制。
-- 不要让模型返回过深嵌套结构。
-- 对模型返回结果仍然要做后端校验。
-- 失败时要有兜底，例如重新请求或返回错误。
+如果模型输出不是合法 JSON，后端必须报错或重试，不能把脏数据继续传给业务流程。
 
 ## 2.9 实践三：SSE 流式响应
 
 ### 为什么需要流式输出
 
-如果模型需要生成长回答，用户等 10 秒才看到结果，体验会很差。流式输出可以让前端边生成边展示。
+长回答、研究报告、RAG 问答、Agent 执行轨迹都不适合让用户等到最后才看到结果。SSE 可以让前端逐步收到：
 
-适合流式输出的场景：
+- 模型 token。
+- 检索进度。
+- 工具调用状态。
+- Agent 执行步骤。
 
-- 长篇解释。
-- 报告生成。
-- 聊天对话。
-- Agent 执行进度。
-- RAG 回答。
-
-不一定适合流式输出的场景：
-
-- 很短的分类任务。
-- 严格 JSON 结构化输出。
-- 后端需要完整结果后才能处理的任务。
-
-### Controller 示例
-
-```java
-import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.PostMapping;
-import reactor.core.publisher.Flux;
-
-@PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-public Flux<String> stream(@RequestBody ChatRequest request) {
-    return aiChatService.stream(request.message());
-}
-```
+本章先实现最简单的模型 token 流。
 
 ### Service 示例
 
-```java
-import reactor.core.publisher.Flux;
+```python
+from collections.abc import AsyncIterator
 
-public Flux<String> stream(String message) {
-    return chatClient.prompt()
-        .user(message)
-        .stream()
-        .content();
-}
+from app.ai.client import client
+from app.settings import settings
+
+
+async def stream_chat(message: str) -> AsyncIterator[str]:
+    stream = await client.responses.create(
+        model=settings.openai_model,
+        input=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": message},
+        ],
+        temperature=0.2,
+        stream=True,
+    )
+
+    async for event in stream:
+        if event.type == "response.output_text.delta":
+            yield event.delta
+```
+
+### Route 示例
+
+```python
+from fastapi.responses import StreamingResponse
+
+
+@router.post("/stream")
+async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
+    async def event_source():
+        async for chunk in stream_chat(request.message):
+            yield f"data: {chunk}\\n\\n"
+        yield "event: done\\ndata: [DONE]\\n\\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")
 ```
 
 ### 前端接收方式
 
-如果使用浏览器原生 `EventSource`，通常是 GET 请求更方便。对于 POST SSE，可以使用 `fetch` 读取流。
+浏览器 `EventSource` 默认使用 GET。如果你希望使用 POST，可以用 `fetch` 读取流，或把会话 ID 放到 GET 流式接口里。课程项目里建议：
 
-简化示例：
+1. `POST /api/ai/tasks` 创建任务。
+2. `GET /api/ai/tasks/{task_id}/events` 订阅 SSE。
 
-```javascript
-const response = await fetch("/api/ai/stream", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ message: "请解释什么是 Workflow" })
-});
-
-const reader = response.body.getReader();
-const decoder = new TextDecoder("utf-8");
-
-while (true) {
-  const { value, done } = await reader.read();
-  if (done) break;
-  console.log(decoder.decode(value));
-}
-```
-
-### 流式输出注意事项
-
-- 需要设置合理超时。
-- 前端要处理断流。
-- 后端要处理用户取消请求。
-- 日志中最好记录完整输出，但不要泄露敏感信息。
-- 如果需要审计，流式结束后要保存完整结果。
+这样更容易做鉴权、恢复和任务记录。
 
 ## 2.10 错误处理
 
-大模型调用常见错误：
+常见错误：
 
-| 错误 | 表现 | 处理方式 |
-| --- | --- | --- |
-| API Key 缺失 | 启动失败或调用 401 | 启动时检查配置 |
-| 模型不可用 | 返回模型不存在或权限不足 | 模型名配置化，保留备选模型 |
-| 超时 | 请求长时间无响应 | 设置超时，提示用户重试 |
-| 限流 | 返回 429 | 指数退避、队列、限流 |
-| 输出格式错误 | JSON 解析失败 | 结构化输出重试，后端校验 |
-| 内容安全拦截 | 返回安全错误 | 给用户解释原因 |
-| 网络失败 | 连接失败 | 重试或降级 |
+| 错误 | 处理方式 |
+| --- | --- |
+| API Key 缺失 | 启动时失败，提示配置环境变量 |
+| 请求超时 | 返回可重试错误，记录超时阶段 |
+| 模型限流 | 指数退避重试，必要时降级模型 |
+| 输出格式错误 | 结构化接口必须重试或报错 |
+| 内容过长 | 截断输入、摘要历史、提示用户缩小范围 |
+| 上游不可用 | 返回友好错误，不暴露内部堆栈 |
 
-### 错误响应建议
-
-不要把供应商原始错误完整暴露给用户。建议统一错误格式：
+错误响应建议：
 
 ```json
 {
   "code": "MODEL_TIMEOUT",
-  "message": "模型响应超时，请稍后重试",
-  "requestId": "req-20260603-001"
+  "message": "模型服务响应超时，请稍后重试",
+  "requestId": "req_20260616_001"
 }
 ```
 
-### 后端日志建议
+## 2.11 日志、成本与性能意识
 
-至少记录：
+从第一天就记录调用日志：
 
-- requestId。
-- userId。
-- model。
-- 输入长度。
-- 输出长度。
-- 耗时。
-- 是否流式。
-- 是否成功。
-- 错误类型。
-
-不要记录：
-
-- 明文 API Key。
-- 用户敏感隐私。
-- 未脱敏的企业机密。
-
-## 2.11 成本与性能意识
-
-从第一天就要建立 token 成本意识。后面做 RAG 和 Agent 时，多轮调用会让成本迅速增加。
-
-### 成本来自哪里
-
-- 输入 token。
-- 输出 token。
-- 多次模型调用。
-- Embedding 调用。
-- Rerank 调用。
-- 工具调用中的外部服务成本。
-
-### 优化方向
-
-| 方法 | 说明 |
+| 字段 | 说明 |
 | --- | --- |
-| 控制上下文长度 | 不把无关历史塞进 prompt |
-| 使用小模型处理简单任务 | 分类、改写、格式化不一定需要大模型 |
-| 缓存重复问题 | FAQ、固定解释可以缓存 |
-| 流式输出 | 改善体感延迟 |
-| 批量处理 | Embedding 等任务可批量 |
-| 监控 token | 每个请求记录成本 |
+| request_id | 每次请求唯一 ID |
+| user_id | 用户 ID，匿名场景也要有会话 ID |
+| model | 使用的模型 |
+| prompt_version | Prompt 版本 |
+| input_chars | 输入字符数 |
+| output_chars | 输出字符数 |
+| latency_ms | 总耗时 |
+| status | success / failed |
+| error_code | 失败原因 |
 
-### 延迟来源
+后续做 RAG 和 Agent 时，还要记录：
 
-| 来源 | 说明 |
-| --- | --- |
-| 模型首 token 时间 | 流式输出也需要等待首 token |
-| 输出长度 | 生成越长越慢 |
-| 网络 | 供应商服务与本地网络 |
-| 上下文长度 | 输入越长，处理越慢 |
-| 工具调用 | 后续 Agent 会更明显 |
+- 检索到哪些文档。
+- 调用了哪些工具。
+- 工具参数是什么。
+- 每轮 Agent 的停止原因。
+- token、费用和耗时。
 
 ## 2.12 安全注意事项
 
-本章虽然只是基础调用，但已经涉及安全。
-
 ### API Key 安全
 
-- 不要写进代码。
-- 不要提交到 Git。
-- 不要放在前端。
-- 用环境变量或密钥管理系统。
-- 泄露后立即轮换。
+- 不要提交 `.env`。
+- 不要把 key 输出到日志。
+- 不要在前端直接调用模型 API。
+- 为不同环境使用不同 key。
 
 ### 输入安全
 
-用户输入可能包含：
-
-- Prompt Injection。
-- 恶意链接。
-- 敏感信息。
-- 超长文本。
-
-基础处理：
-
 - 限制输入长度。
-- 对日志脱敏。
-- 对特殊场景做内容安全检查。
-- 不能让用户输入覆盖系统规则。
+- 对上传文件做类型和大小限制。
+- 不把用户输入拼进 SQL。
+- 不把用户输入当成系统规则。
 
 ### 输出安全
 
-模型输出可能：
-
-- 编造事实。
-- 泄露上下文。
-- 返回不合规建议。
-- 不符合 JSON 格式。
-
-基础处理：
-
-- 后端校验。
-- 高风险任务加人工确认。
-- 企业知识问答必须引用来源。
-- 不确定时允许模型说不知道。
+- 模型输出必须被视为不可信。
+- 结构化输出要校验 schema。
+- 引用来源必须来自后端检索结果。
+- 高风险动作不能只靠模型一句话触发。
 
 ## 2.13 本章完整实践任务
 
-完成下面 4 个任务，才算完成第 2 章。
-
 ### 任务 1：基础问答接口
-
-实现：
-
-```text
-POST /api/ai/chat
-```
 
 要求：
 
-- 输入 `message`。
-- 返回 `answer`。
-- 设置 system prompt。
-- 处理空输入。
+- 使用 FastAPI。
+- 使用 OpenAI SDK。
+- `POST /api/ai/chat` 能返回中文回答。
+- API Key 从环境变量读取。
 
 验收：
 
 - 能回答“什么是 AI Agent”。
-- 空输入返回明确错误。
-- API Key 不在代码中。
+- 控制台不打印 API Key。
+- 空字符串输入会被 Pydantic 拦截。
 
 ### 任务 2：结构化输出接口
 
-实现：
+要求：
 
-```text
-POST /api/ai/lesson-answer
-```
-
-要求返回：
-
-```json
-{
-  "answer": "...",
-  "concept": "...",
-  "difficulty": "beginner",
-  "keyPoints": [],
-  "nextSteps": []
-}
-```
+- `POST /api/ai/structured` 返回 `answer`、`confidence`、`citations`、`missing_info`。
+- 使用 Pydantic 校验。
+- 非法输出不能静默通过。
 
 验收：
 
-- 字段完整。
-- `difficulty` 在允许范围内。
-- JSON 可被后端对象正常接收。
+- `confidence` 只能是 `high`、`medium`、`low`。
+- `citations` 是数组。
+- 出错时有明确错误信息。
 
 ### 任务 3：流式输出接口
 
-实现：
-
-```text
-POST /api/ai/stream
-```
-
 要求：
 
-- 使用 SSE 或可读流。
-- 前端或 curl 能看到逐步输出。
-- 断流时不会让后端异常崩溃。
+- `POST /api/ai/stream` 使用 SSE 返回。
+- 前端或 `curl -N` 能看到分片输出。
+- 最后发送 done 事件。
 
 验收：
 
-- 长回答能边生成边展示。
-- 服务端日志能看到请求开始和结束。
+- 长回答不需要等到全部生成完成。
+- 客户端断开时服务端不会继续无限执行。
 
 ### 任务 4：调用日志
 
-为每次模型调用记录：
+要求：
 
-```text
-requestId
-userId
-model
-inputLength
-outputLength
-durationMs
-success
-errorType
-```
+- 每次请求生成 `request_id`。
+- 记录模型、耗时、状态。
+- 失败时记录错误类型。
 
 验收：
 
-- 成功请求有日志。
-- 失败请求有日志。
-- 日志不包含 API Key。
+- 能根据 `request_id` 找到一次请求的完整日志。
+- 日志里没有 API Key 和敏感输入全文。
 
 ## 2.14 本章自测题
 
 ### 概念题
 
-1. system prompt 和 user prompt 有什么区别？
-2. 为什么结构化输出仍然需要后端校验？
-3. temperature 调高后可能带来什么变化？
-4. 为什么不要把所有历史对话都塞进上下文？
-5. SSE 流式输出和普通同步响应的区别是什么？
-6. 大模型调用日志至少应该记录哪些字段？
+1. system、user、assistant、tool 消息各自负责什么？
+2. 为什么结构化输出还需要后端校验？
+3. SSE 和一次性响应分别适合什么场景？
+4. 为什么模型输出不能直接写入数据库或触发高风险动作？
 
 ### 判断题
 
-1. API Key 可以放到前端，只要接口隐藏就安全。  
-   答案：错误。
+1. API Key 可以临时写在代码里，只要不截图就行。  
+2. 结构化输出只要 prompt 写“返回 JSON”就一定可靠。  
+3. 模型调用日志应该记录 request_id、模型、耗时和失败原因。  
+4. 流式输出可以改善长回答的用户体验。  
 
-2. 结构化输出可以帮助后端稳定处理模型结果。  
-   答案：正确。
+参考答案：
 
-3. 流式输出能减少模型实际计算量。  
-   答案：不一定。它主要改善用户体感延迟。
-
-4. 模型输出 JSON 后就不需要校验了。  
-   答案：错误。
-
-5. 上下文越长，回答一定越好。  
-   答案：错误。
-
-### 实战题
-
-设计一个“AI 学习助手”的接口，要求：
-
-- 用户输入一个概念。
-- 模型返回概念解释、难度、学习步骤和练习题。
-- 输出必须是 JSON。
-- 支持普通响应即可，不需要流式。
-
-请写出：
-
-1. 请求 JSON。
-2. 响应 JSON。
-3. Java record。
-4. system prompt。
+1. 错。  
+2. 错。  
+3. 对。  
+4. 对。  
 
 ## 2.15 本章完成标准
 
-你完成第 2 章的标准：
+完成本章后，你应该能做到：
 
-- 能启动一个 Spring Boot AI 服务。
-- 能完成一次普通模型调用。
-- 能完成一次结构化输出。
-- 能完成一次流式输出。
-- 能解释主要模型参数。
-- 能处理空输入、超时、输出格式错误等基础问题。
-- 能记录基础调用日志。
-
-如果你还不能稳定完成结构化输出，不建议进入 Tool Calling。因为工具调用本质上也是一种结构化输出，只是输出变成了“工具名 + 参数”。
+- 能启动一个 FastAPI AI 服务。
+- 能完成普通问答调用。
+- 能用 Pydantic 校验结构化输出。
+- 能实现一个 SSE 流式响应接口。
+- 能说明调用日志应该记录哪些字段。
+- 能说清楚 API Key、输入、输出的安全边界。
 
 ## 2.16 本章学习资料
 
 ### 必读资料
 
-- [Spring AI Reference Documentation](https://docs.spring.io/spring-ai/reference/)
-- [Spring AI Chat Client API](https://docs.spring.io/spring-ai/reference/api/chatclient.html)
-- [Spring AI Structured Output Converter](https://docs.spring.io/spring-ai/reference/api/structured-output-converter.html)
 - [OpenAI API Documentation](https://platform.openai.com/docs)
-- [OpenAI Structured Outputs Guide](https://platform.openai.com/docs/guides/structured-outputs)
+- [OpenAI SDKs](https://developers.openai.com/api/docs/libraries)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Pydantic Documentation](https://docs.pydantic.dev/)
 
 ### 扩展资料
 
-- [Spring WebFlux Reference](https://docs.spring.io/spring-framework/reference/web/webflux.html)
-- [LangChain4j Documentation](https://docs.langchain4j.dev/)
-- [OpenAI Streaming Guide](https://platform.openai.com/docs/guides/streaming-responses)
+- [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
+- [Pydantic AI Documentation](https://ai.pydantic.dev/)
+- [uv Documentation](https://docs.astral.sh/uv/)
 
 ## 2.17 本章复盘模板
 
@@ -827,7 +645,7 @@ errorType
 
 ## 我完成的接口
 
-## 我对 system / user / assistant 消息的理解
+## 我对 system / user / assistant / tool 消息的理解
 
 ## 我对结构化输出的理解
 
@@ -837,5 +655,3 @@ errorType
 
 ## 进入第 3 章前仍然不清楚的问题
 ```
-
-本章的关键不是写出多复杂的功能，而是建立“模型调用也需要工程化”的意识。

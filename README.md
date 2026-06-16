@@ -1,27 +1,42 @@
 # AI Agent 学习大纲与课程设计
 
-更新时间：2026-05-26  
-适用对象：有 Java / Spring Boot 基础，想系统学习企业级 AI Agent、RAG、MCP 与多智能体应用开发的工程师。
+更新时间：2026-06-16  
+适用对象：想系统学习企业级 AI Agent、RAG、MCP 与多智能体应用开发，并希望快速落地项目的后端/全栈工程师。
 
 ## 课程定位
 
-这份大纲基于截图中的 AI Agent 学习资料整理而成。原资料的核心方向是：以 Java 21、Spring Boot、Spring AI、LangChain4j 为主栈，围绕企业知识库问答系统和多智能体平台，学习 RAG、Tool Calling、MCP、Workflow、多 Agent 协作与工程化落地。
+本课程从原来的 Java / Spring Boot 主线调整为 **Python 主线，Go 可选扩展**。
 
-课程不只追逐框架关键词，而是围绕一个主线展开：
+调整原因很简单：AI Agent、RAG、Prompt/Context Engineering、评估、MCP 和多智能体编排仍在快速演进，Python 生态的官方 SDK、示例、社区组件和实验速度更适合学习与原型验证。Go 仍然很有价值，但更适合承担稳定、高并发、边界清晰的工程服务，例如 MCP Server、工具服务、API 网关、异步任务 worker 和企业系统集成。
+
+课程主线不追逐某个框架名，而是围绕一个能力路径展开：
 
 > 从“能调用大模型”到“能构建可评估、可观测、可部署的企业级 AI Agent 系统”。
 
-最终建议完成两个作品：
+最终建议沉淀两个作品，但实施优先级不同：
 
-1. **Know-Engine：企业级知识库问答系统**
-2. **Dodo-Agent：企业级端到端通用智能体平台**
+1. **Know-Engine：企业级知识库问答系统**，作为 12 周主项目。
+2. **Dodo-Agent：企业级端到端通用智能体平台**，作为进阶 MVP 和后续扩展方向。
+
+## 技术路线结论
+
+| 选择 | 结论 | 原因 |
+| --- | --- | --- |
+| Python 作为主线 | 推荐 | OpenAI Agents SDK、Pydantic AI、LangGraph、LlamaIndex、Haystack、FastAPI、MCP Python SDK 等生态更完整，适合学习、实验和快速交付 |
+| Go 作为主线 | 暂不推荐 | Go SDK 可以稳定调用模型，也有 MCP Go SDK 和 Genkit 等工具，但 Agent 编排、RAG 教学资料、评估工具和示例丰富度不如 Python |
+| Python + Go 混合 | 推荐进阶路线 | Python 负责 Agent/RAG/Workflow 编排，Go 负责企业工具服务、MCP Server、网关、后台任务和高并发接口 |
+
+本课程默认使用 Python 完成核心学习任务；每个关键阶段会标注 Go 的可选落地点。
+
+详细论证见：[Python / Go 技术路线可行性说明](docs/python-go-feasibility.md)。
 
 ## 学习目标
 
 学完后应具备以下能力：
 
 - 理解 AI Agent、RAG、Workflow、MCP、多 Agent 的边界与适用场景。
-- 使用 Spring AI / LangChain4j 构建 Java 大模型应用。
+- 使用 Python、FastAPI、OpenAI SDK / Agents SDK 构建大模型应用。
+- 使用 Pydantic 定义结构化输出、工具参数、业务 DTO 和校验边界。
 - 实现文档解析、切片、向量化、混合检索、重排、引用溯源等 RAG 核心能力。
 - 设计可控的 Tool Calling / Function Calling 机制，让模型安全调用业务能力。
 - 使用 MCP 将企业内部工具、知识库、数据库和外部 API 标准化接入 Agent。
@@ -32,26 +47,30 @@
 
 | 层级 | 推荐技术 |
 | --- | --- |
-| 语言与框架 | Java 21、Spring Boot 3.x、Spring AI、LangChain4j |
+| 主语言与 Web 框架 | Python 3.12+、FastAPI、Uvicorn、Pydantic |
 | 模型接入 | OpenAI API、兼容 OpenAI 协议的模型服务、本地模型服务 |
+| Agent 编排 | OpenAI Agents SDK、Pydantic AI、LangGraph；进阶可比较 AutoGen、CrewAI |
+| RAG 框架 | 优先先自研最小链路；进阶比较 LlamaIndex、LangChain、Haystack |
 | Agent 协议 | MCP，重点学习 stdio 与 Streamable HTTP；旧 HTTP+SSE 作为兼容知识 |
-| 检索与存储 | PostgreSQL + pgvector、Elasticsearch、Neo4j、MySQL |
-| 文件与对象存储 | MinIO |
-| 缓存与并发控制 | Redis、Redisson |
-| 文档处理 | PDF、Word、Excel、CSV、HTML 表格解析 |
-| 任务与调度 | XXL-Job 或 Spring Scheduler |
-| 观测与评估 | OpenTelemetry、日志链路、RAG 评估、Agent 轨迹追踪 |
-| 交互体验 | SSE 流式输出、任务进度、会话管理、引用来源展示 |
+| MCP 实现 | MCP Python SDK；Go 扩展使用 MCP Go SDK |
+| 检索与存储 | PostgreSQL + pgvector、Elasticsearch / OpenSearch、Neo4j、SQLite、MySQL |
+| 文件与对象存储 | MinIO 或 S3 兼容存储 |
+| 缓存与并发控制 | Redis、RQ / Celery / Dramatiq，或 Go worker |
+| 文档处理 | pypdf、python-docx、openpyxl、pandas、BeautifulSoup、unstructured |
+| 任务与调度 | APScheduler、Celery Beat、Temporal；Go 可选 Asynq / cron |
+| 观测与评估 | OpenTelemetry、structlog、pytest、RAGAS / DeepEval、Agent trace |
+| 交互体验 | SSE / WebSocket 流式输出、任务进度、会话管理、引用来源展示 |
+| Go 扩展位置 | MCP Server、工具微服务、API 网关、批处理 worker、企业系统适配器 |
 
 ## 课程结构总览
 
 | 阶段 | 章节 | 核心产出 |
 | --- | --- | --- |
-| 基础篇 | 1-4 章 | 会调用模型、写 Prompt、做结构化输出、接入工具 |
-| RAG 篇 | 5-7 章 | 完成可用的企业知识库问答 MVP |
+| 基础篇 | 1-4 章 | 会调用模型、写 Prompt、做结构化输出、搭建 Python AI 服务骨架 |
+| 工具与 RAG 篇 | 5-7 章 | 完成工具调用、基础 RAG、高级检索增强 |
 | Agent 篇 | 8-10 章 | 实现 ReAct、Workflow、MCP 工具接入 |
 | 平台篇 | 11-13 章 | 完成多 Agent 平台与企业级工程能力 |
-| 实战篇 | 14-15 章 | 交付 Know-Engine 与 Dodo-Agent 两个项目 |
+| 实战篇 | 14-15 章 | 优先完整交付 Know-Engine，进阶完成 Dodo-Agent MVP |
 
 ## 第 1 章：AI Agent 全景与学习路线
 
@@ -60,26 +79,15 @@
 ### 学习目标
 
 - 区分 Chatbot、RAG 应用、Workflow、Agent、多 Agent。
-- 理解截图资料中的 Know-Engine 与 Dodo-Agent 分别解决什么问题。
+- 理解 Know-Engine 与 Dodo-Agent 分别解决什么问题。
 - 建立“先稳定工作流，再引入 Agent 自主性”的工程判断。
-
-### 核心内容
-
-- AI Agent 的基本组成：模型、指令、工具、上下文、记忆、执行循环、评估。
-- Workflow 与 Agent 的区别：Workflow 强约束，Agent 更自主。
-- 企业级 Agent 的典型场景：知识库问答、市场情报分析、智能办公助手、多轮深度调研、PPT/报告生成。
-- 课程项目蓝图：Know-Engine 与 Dodo-Agent。
+- 明确 Python 主线与 Go 扩展的技术边界。
 
 ### 实战任务
 
 - 画出自己要做的 Agent 系统架构图。
 - 列出 3 个适合用 RAG 的场景，3 个适合用 Agent 的场景，3 个更适合固定 Workflow 的场景。
-
-### 学习资料
-
-- [OpenAI Agents SDK - Agents](https://openai.github.io/openai-agents-python/agents/)
-- [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
-- [LangChain4j Documentation](https://docs.langchain4j.dev/)
+- 写一张技术路线选择卡：哪些模块用 Python，哪些模块未来可以用 Go。
 
 ## 第 2 章：大模型应用基础
 
@@ -89,26 +97,14 @@
 
 - 掌握模型调用、消息格式、结构化输出、流式响应。
 - 理解 token、上下文窗口、温度、采样、输出约束对结果的影响。
-
-### 核心内容
-
-- Chat Completion / Responses 类接口的基本概念。
-- System / User / Assistant / Tool 消息的职责。
-- JSON Schema / POJO 映射 / 结构化输出。
-- 同步响应、异步响应、SSE 流式输出。
-- 常见失败：格式漂移、幻觉、长上下文遗漏、输出截断。
+- 使用 FastAPI + OpenAI SDK 实现最小可用 AI 服务。
 
 ### 实战任务
 
-- 实现一个 Spring Boot 接口：输入问题，返回模型回答。
+- 实现一个 FastAPI 接口：输入问题，返回模型回答。
 - 增加结构化输出：让模型返回 `answer`、`confidence`、`citations`。
 - 增加 SSE 流式响应。
-
-### 学习资料
-
-- [Spring AI Reference Documentation](https://docs.spring.io/spring-ai/reference/)
-- [Spring AI Chat Client API](https://docs.spring.io/spring-ai/reference/api/chatclient.html)
-- [OpenAI API Documentation](https://platform.openai.com/docs)
+- 为每次调用记录请求 ID、模型、token、耗时、错误信息。
 
 ## 第 3 章：Prompt Engineering 与 Context Engineering
 
@@ -118,53 +114,30 @@
 
 - 从“写提示词”升级到“管理上下文”。
 - 学会为企业应用设计稳定、可复用、可测试的提示词模板。
-
-### 核心内容
-
-- Prompt 的基本结构：角色、任务、约束、输入、输出格式、失败处理。
-- Few-shot 示例、反例约束、输出边界。
-- Context Engineering：动态上下文、用户状态、业务数据、会话历史、工具结果。
-- 提示词版本管理与 A/B 测试。
-- 安全提示：不要把权限判断只交给 Prompt。
+- 使用 Markdown / YAML 管理 prompt 版本，使用 pytest 做提示词回归测试。
 
 ### 实战任务
 
 - 为企业知识库问答设计系统提示词。
 - 为数据分析 Agent 设计结构化输出模板。
-- 建立提示词变更记录表。
+- 建立提示词变更记录表和最小测试集。
 
-### 学习资料
+## 第 4 章：Python AI 应用工程栈
 
-- [OpenAI Prompt Engineering Guide](https://platform.openai.com/docs/guides/prompt-engineering)
-- [Spring AI Prompt API](https://docs.spring.io/spring-ai/reference/api/prompt.html)
-
-## 第 4 章：Spring AI 与 LangChain4j 入门
-
-详细学习文档：[第 4 章：Spring AI 与 LangChain4j 入门](chapters/04-spring-ai-and-langchain4j.md)
+详细学习文档：[第 4 章：Python AI 应用工程栈](chapters/04-python-ai-application-stack.md)
 
 ### 学习目标
 
-- 掌握 Java 生态下构建 AI 应用的两条常见路线。
-- 理解 Spring AI 与 LangChain4j 的定位差异。
-
-### 核心内容
-
-- Spring AI：适合 Spring Boot 体系内统一模型、向量库、Tool、RAG、MCP。
-- LangChain4j：适合 Java 应用快速组合 LLM、Tools、Memory、RAG、Agent。
-- 模型适配、配置管理、服务封装、异常处理。
-- 如何设计自己的 `AiService`、`ToolService`、`KnowledgeService`。
+- 掌握 Python 生态下构建 AI 应用的常见路线。
+- 理解 OpenAI SDK、OpenAI Agents SDK、Pydantic AI、LangGraph、LlamaIndex 的定位差异。
+- 能根据项目阶段选择“少框架自研”还是“引入编排框架”。
 
 ### 实战任务
 
-- 用 Spring AI 实现一个问答接口。
-- 用 LangChain4j 实现同样的接口。
-- 对比两种实现的依赖、代码结构、扩展方式。
-
-### 学习资料
-
-- [Spring AI Reference Documentation](https://docs.spring.io/spring-ai/reference/)
-- [LangChain4j Documentation](https://docs.langchain4j.dev/)
-- [LangChain4j Tutorials](https://docs.langchain4j.dev/category/tutorials/)
+- 用 OpenAI SDK 实现一个问答接口。
+- 用 OpenAI Agents SDK 实现同样的概念解释 Agent。
+- 用 Pydantic 定义输入、输出和工具参数。
+- 写一份框架取舍报告。
 
 ## 第 5 章：Tool Calling / Function Calling
 
@@ -174,42 +147,30 @@
 
 - 让模型能够安全调用业务函数、外部 API、数据库查询能力。
 - 理解工具定义、参数校验、权限控制和调用回放。
-
-### 核心内容
-
-- Tool Calling 的工作机制：模型选择工具，应用执行工具，结果回传模型。
-- 工具描述、参数 Schema、返回值设计。
-- Java 方法如何暴露为 Tool。
-- 工具权限：用户身份、资源权限、操作白名单。
-- 工具调用日志：记录工具名、参数、结果、耗时、失败原因。
-- 防止危险工具：删除、转账、发邮件、改权限等操作必须有人类确认。
+- 使用 Python function tool 与 Pydantic schema 管理工具边界。
 
 ### 实战任务
 
 - 实现 3 个工具：天气查询、订单查询、知识库搜索。
 - 给工具增加参数校验和用户权限校验。
 - 记录一次完整工具调用轨迹。
-
-### 学习资料
-
-- [Spring AI Tool Calling](https://docs.spring.io/spring-ai/reference/api/tools.html)
-- [LangChain4j Tools Tutorial](https://docs.langchain4j.dev/tutorials/tools/)
-- [OpenAI Agents SDK - Tools](https://openai.github.io/openai-agents-python/tools/)
+- 可选：用 Go 实现一个只读订单查询 MCP Server，让 Python Agent 调用。
 
 ## 第 6 章：RAG 基础：从文档到答案
+
+详细学习文档：[第 6 章：RAG 基础：从文档到答案](chapters/06-rag-basics.md)
 
 ### 学习目标
 
 - 搭建企业知识库问答系统的最小可用版本。
 - 理解 RAG 的关键链路：加载、解析、切片、向量化、检索、生成、引用。
 
-### 核心内容
+### 推荐实现
 
-- RAG 基本流程：Document Loader、Parser、Chunker、Embedding、Vector Store、Retriever、Generator。
-- 文档类型：PDF、Word、Excel、CSV、Markdown、网页。
-- 切片策略：固定长度、按标题、按段落、父子切片、表格保留。
-- Embedding 模型选择与向量维度管理。
-- 引用来源与答案可追溯。
+- FastAPI 提供文档上传与问答接口。
+- `pypdf`、`python-docx`、`openpyxl` 解析多格式文件。
+- PostgreSQL + pgvector 存储向量和文档元数据。
+- 先自研 `Loader -> Chunker -> Embedder -> Retriever -> Generator`，再比较 LlamaIndex / LangChain。
 
 ### 实战任务
 
@@ -217,57 +178,47 @@
 - 实现“问题 -> 检索 -> 生成答案 -> 返回引用来源”。
 - 加入文档列表、文档删除、重新索引能力。
 
-### 学习资料
+## 第 7 章：高级 RAG：检索增强、多源路由与评估
 
-- [Spring AI ETL Pipeline](https://docs.spring.io/spring-ai/reference/api/etl-pipeline.html)
-- [Spring AI Vector Databases](https://docs.spring.io/spring-ai/reference/api/vectordbs.html)
-- [LangChain4j RAG Tutorial](https://docs.langchain4j.dev/tutorials/rag/)
-- [Retrieval-Augmented Generation Paper](https://arxiv.org/abs/2005.11401)
-
-## 第 7 章：高级 RAG：检索增强与多源路由
+详细学习文档：[第 7 章：高级 RAG：检索增强、多源路由与评估](chapters/07-advanced-rag-and-evaluation.md)
 
 ### 学习目标
 
 - 解决基础 RAG 的常见问题：召回差、答案虚、表格难查、多数据源难融合。
 - 设计企业级知识检索增强链路。
+- 建立可重复运行的 RAG 评估集和回归报告。
 
-### 核心内容
+### 推荐实现
 
-- 查询改写：同义改写、扩展、纠错、意图识别。
-- 混合检索：向量检索 + 全文检索 + 元数据过滤。
-- 重排：Rerank、Top-K、阈值过滤。
-- 多源路由：Elasticsearch、MySQL、Neo4j、对象存储。
-- Text2SQL 与 Text2Cypher 的边界：适合查询结构化数据，不适合替代权限系统。
-- Excel 与表格数据的特殊处理：单元格语义、表头、合并单元格、HTML 表格保留。
+- 使用查询改写提升召回。
+- 使用 pgvector + Elasticsearch / OpenSearch 做混合检索。
+- 使用 rerank 模型或 cross-encoder 做重排。
+- 对结构化数据使用 Text2SQL，但 SQL 权限与审计必须由后端控制。
+- 对关系数据使用 Neo4j / Cypher，但先做固定模板，再考虑模型生成查询。
 
 ### 实战任务
 
-- 为知识库增加 Elasticsearch 全文检索。
-- 为销售数据增加 MySQL Text2SQL 查询。
-- 为组织/产品关系增加 Neo4j Text2Cypher 查询。
+- 为知识库增加全文检索。
+- 为销售数据增加受控 Text2SQL 查询。
+- 为组织/产品关系增加图谱查询。
 - 实现检索路由：让系统判断该查文档、数据库还是图谱。
+- 输出评估报告，对比每次检索策略调整的效果。
 
-### 学习资料
+## 第 8 章：Agent 基础：执行循环、工具、记忆与 Trace
 
-- [Elasticsearch Vector Search](https://www.elastic.co/guide/en/elasticsearch/reference/current/knn-search.html)
-- [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/)
-- [pgvector](https://github.com/pgvector/pgvector)
-- [LangChain4j Embedding Stores](https://docs.langchain4j.dev/integrations/embedding-stores/)
-
-## 第 8 章：Agent 基础：ReAct、记忆与执行循环
+详细学习文档：[第 8 章：Agent 基础：执行循环、工具、记忆与 Trace](chapters/08-agent-basics.md)
 
 ### 学习目标
 
 - 从一次性问答升级到能够“思考、调用工具、观察结果、继续行动”的 Agent。
 - 理解 Agent 的不稳定性，并学会用限制条件控制它。
+- 记录 Agent run、step、工具调用和最终状态。
 
-### 核心内容
+### 推荐实现
 
-- ReAct：Reasoning + Acting。
-- Agent 执行循环：计划、工具调用、观察、下一步决策、完成。
-- 会话记忆：短期记忆、摘要记忆、长期记忆。
-- Stop condition：最大轮数、最大 token、最大工具次数、超时。
-- 工具失败恢复：重试、降级、人工确认、返回失败说明。
+- 先用 OpenAI Agents SDK 实现单 Agent。
+- 限制最大工具调用次数、最大运行时长、最大 token。
+- 工具失败时返回结构化错误，让 Agent 决定追问、重试或失败退出。
 
 ### 实战任务
 
@@ -275,26 +226,21 @@
 - 增加最多 5 轮工具调用限制。
 - 实现工具调用失败后的重试与兜底回答。
 
-### 学习资料
-
-- [ReAct Paper](https://arxiv.org/abs/2210.03629)
-- [OpenAI Agents SDK - Running Agents](https://openai.github.io/openai-agents-python/running_agents/)
-- [LangChain4j AI Services](https://docs.langchain4j.dev/tutorials/ai-services/)
-
 ## 第 9 章：Workflow 与 State Machine
+
+详细学习文档：[第 9 章：Workflow 与 State Machine](chapters/09-workflow-state-machine.md)
 
 ### 学习目标
 
 - 学会把不稳定的 Agent 任务拆成更稳定的工作流。
 - 选择何时使用 Workflow，何时使用 Agent。
+- 掌握状态持久化、人工确认、幂等和失败恢复。
 
-### 核心内容
+### 推荐实现
 
-- Workflow：固定步骤、条件分支、人工确认、状态持久化。
-- State Machine：任务状态、失败状态、重试状态、完成状态。
-- Plan-Execute：先规划，再逐步执行。
-- 多轮深度调研：搜索、阅读、提炼、交叉验证、生成报告。
-- PPT 生成：主题理解、大纲生成、素材检索、页面规划、内容生成。
+- 简单流程先用 Python 函数组合。
+- 复杂状态用 LangGraph、Temporal 或数据库状态机。
+- 高风险步骤必须加入人工确认和可恢复状态。
 
 ### 实战任务
 
@@ -302,41 +248,27 @@
 - 实现一个“研究主题 -> 报告大纲 -> 资料检索 -> 报告生成”的流程。
 - 给每一步记录状态和耗时。
 
-### 学习资料
-
-- [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
-- [OpenAI Agents SDK - Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
-- [OpenAI Agents SDK - Guardrails](https://openai.github.io/openai-agents-python/guardrails/)
-
 ## 第 10 章：MCP 基础与接入
+
+详细学习文档：[第 10 章：MCP 基础与接入](chapters/10-mcp-integration.md)
 
 ### 学习目标
 
 - 理解 MCP 的作用：把外部工具和数据源标准化提供给模型应用。
 - 掌握 MCP Server 与 MCP Client 的基本实现。
+- 明确 MCP 的安全边界、可信 Server 列表和 Go 扩展时机。
 
-### 核心内容
+### 推荐实现
 
-- MCP 的角色：Host、Client、Server。
-- MCP 能力：Tools、Resources、Prompts。
-- Transport：stdio 与 Streamable HTTP 是当前重点；旧 HTTP+SSE 作为兼容知识。
-- MCP Server：把企业内部服务包装成标准工具。
-- MCP Client：在 Agent 应用中发现和调用 MCP 工具。
-- MCP 调试工具与连接测试。
+- 用 MCP Python SDK 实现第一个 stdio MCP Server。
+- 用 MCP Inspector 调试工具列表和调用结果。
+- 可选用 Go 实现高性能 MCP Server，暴露订单查询、库存查询、权限查询等只读工具。
 
 ### 实战任务
 
 - 实现一个 MCP Server：暴露订单查询、知识库检索两个工具。
-- 实现一个 MCP Client：从 Spring Boot 应用调用 MCP 工具。
+- 实现一个 MCP Client：从 Python Agent 应用调用 MCP 工具。
 - 使用 MCP Inspector 调试工具列表和调用结果。
-
-### 学习资料
-
-- [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
-- [MCP Specification - Transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
-- [Spring AI MCP Overview](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-overview.html)
-- [Spring AI MCP Client Boot Starter](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-client-boot-starter-docs.html)
-- [Spring AI MCP Server Boot Starter](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html)
 
 ## 第 11 章：多 Agent 架构设计
 
@@ -345,25 +277,17 @@
 - 设计一个可扩展的多智能体平台，而不是把所有能力塞进一个 Agent。
 - 掌握 BaseAgent、Agent Registry、任务路由、Agent 协作。
 
-### 核心内容
+### 推荐实现
 
-- BaseAgent：统一输入、输出、上下文、工具、日志、错误处理。
-- Agent 类型：智能问答 Agent、文件问答 Agent、深度研究 Agent、PPT 生成 Agent。
-- Agent 路由：基于意图分类、规则路由、模型路由。
-- Handoff：一个 Agent 把任务交给另一个 Agent。
-- 多 Agent 的风险：循环转交、上下文膨胀、责任不清、成本失控。
+- 使用 OpenAI Agents SDK 的 handoff 或自定义 registry 实现 Agent 路由。
+- 每个 Agent 只负责一个清晰能力：知识库问答、Web 搜索、报告生成、文件分析。
+- Agent 之间传递结构化结果，而不是整段自由文本。
 
 ### 实战任务
 
 - 实现 `BaseAgent` 抽象。
 - 实现 3 个 Agent：知识库问答、Web 搜索、报告生成。
 - 实现简单任务路由：根据用户意图选择 Agent。
-
-### 学习资料
-
-- [OpenAI Agents SDK - Agents](https://openai.github.io/openai-agents-python/agents/)
-- [OpenAI Agents SDK - Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
-- [LangChain4j Agents Tutorial](https://docs.langchain4j.dev/tutorials/agents/)
 
 ## 第 12 章：交互体验与企业集成
 
@@ -372,25 +296,17 @@
 - 让 AI 应用从“能跑”变成“可用、可感知、可协作”。
 - 实现流式输出、进度感知、富媒体卡片和企业 IM 集成。
 
-### 核心内容
+### 推荐实现
 
-- SSE 流式输出：模型 token、工具状态、任务进度。
-- 全链路进度：检索中、调用工具中、生成中、完成。
-- 富媒体结果：表格、图表、引用、文件、链接。
-- 会话管理：多轮上下文、历史记录、会话标题、会话归档。
-- 企业 IM 集成：钉钉、飞书、企业微信的消息回调与机器人接入。
+- FastAPI 使用 SSE 或 WebSocket 输出模型 token、工具状态、任务进度。
+- 前端展示引用、工具调用轨迹、失败原因和可重试入口。
+- 企业 IM 入口只做鉴权、消息适配和任务提交，不承载复杂 Agent 逻辑。
 
 ### 实战任务
 
 - 为 Know-Engine 增加流式输出和进度条。
 - 为 Agent 工具调用增加前端可视化轨迹。
 - 接入一个企业 IM 机器人，实现问答入口。
-
-### 学习资料
-
-- [Spring WebFlux Reference](https://docs.spring.io/spring-framework/reference/web/webflux.html)
-- [DingTalk Open Platform](https://open.dingtalk.com/document/)
-- [OpenAI Agents SDK - Streaming](https://openai.github.io/openai-agents-python/streaming/)
 
 ## 第 13 章：企业级工程化
 
@@ -399,15 +315,12 @@
 - 掌握 AI Agent 上生产所需的安全、稳定、可观测、可评估能力。
 - 避免“Demo 很惊艳，线上不可控”的常见问题。
 
-### 核心内容
+### 推荐实现
 
-- 权限隔离：用户、租户、知识库、文档、工具权限。
-- 数据安全：上传文件加密、访问审计、敏感信息脱敏。
-- 评估体系：RAG 命中率、答案忠实度、引用准确率、工具调用成功率。
-- 观测体系：Prompt、检索结果、工具调用、token、耗时、异常。
-- 成本控制：缓存、摘要记忆、小模型路由、Embedding 批处理。
-- 并发与稳定性：限流、熔断、重试、幂等、超时。
-- 部署：配置管理、模型密钥管理、Docker、CI/CD。
+- 用 PostgreSQL 记录 conversation、agent_run、tool_call、retrieval_hit、evaluation_case。
+- 用 pytest 固化 RAG 与 tool calling 回归测试。
+- 用 OpenTelemetry / structlog 追踪请求链路。
+- 用限流、超时、幂等 key、人工确认保护高风险工具。
 
 ### 实战任务
 
@@ -415,12 +328,6 @@
 - 为每次回答保存检索结果和引用来源。
 - 实现用户级知识库权限过滤。
 - 增加 RAG 回归测试集。
-
-### 学习资料
-
-- [OpenAI Agents SDK - Tracing](https://openai.github.io/openai-agents-python/tracing/)
-- [LangChain4j Testing and Evaluation](https://docs.langchain4j.dev/tutorials/testing-and-evaluation/)
-- [Spring AI Observability](https://docs.spring.io/spring-ai/reference/observability/)
 
 ## 第 14 章：项目实战一：Know-Engine 企业知识库问答系统
 
@@ -430,12 +337,12 @@
 
 ### 核心功能
 
-- 文档上传：PDF、Word、Excel、CSV。
+- 文档上传：PDF、Word、Excel、CSV、Markdown、HTML。
 - 文档解析：文本、表格、标题层级、元数据。
 - 智能切片：固定切片、父子切片、表格保留。
 - 知识存储：对象存储 + 元数据表 + 向量库。
 - 检索增强：查询改写、向量检索、全文检索、Rerank。
-- 多源路由：文档、MySQL、Neo4j、Elasticsearch。
+- 多源路由：文档、SQL、图谱、外部 API。
 - 问答体验：SSE 流式输出、进度展示、引用来源。
 - 管理能力：文档版本、重新索引、删除、权限。
 
@@ -465,7 +372,7 @@
 - Agent Registry：注册、发现、路由、版本管理。
 - MCP 工具接入：通过 MCP Server 调用企业工具。
 - 会话与文件管理：会话历史、上传文件、任务记录。
-- 可观测性：展示 Agent 思考步骤、工具调用和失败原因。
+- 可观测性：展示 Agent 步骤、工具调用和失败原因。
 
 ### 建议里程碑
 
@@ -477,12 +384,30 @@
 | M4 | MCP 接入 | 至少 2 个企业工具通过 MCP 调用 |
 | M5 | 多 Agent 平台 | 用户输入任务后能自动路由和协作 |
 
+## 项目实施优先级
+
+12 周内建议把 **Know-Engine 作为主项目完整交付**，把 **Dodo-Agent 作为进阶 MVP**。这样更符合学习和工程落地节奏。
+
+| 优先级 | 项目 | 12 周目标 | 不建议在 12 周内承诺 |
+| --- | --- | --- | --- |
+| P0 | Know-Engine | 完成企业知识库问答 MVP，并具备混合检索、引用、权限、评估、流式输出 | 覆盖所有复杂文档格式、完整企业权限平台 |
+| P1 | Dodo-Agent | 完成单 Agent + Workflow + MCP 的可演示平台雏形 | 完整多 Agent 平台、PPT 生成、复杂企业 IM 全量集成 |
+| P2 | Go 扩展 | 实现 1 个只读 MCP Server 或工具微服务 | 大规模 Go 化所有工具和网关 |
+
+每个项目都按三层验收推进：
+
+| 层级 | 含义 | 验收方式 |
+| --- | --- | --- |
+| MVP | 功能链路跑通 | 能演示核心流程，有基础日志 |
+| 进阶 | 效果和稳定性提升 | 有评估集、失败处理、权限过滤 |
+| 生产化 | 接近真实企业部署 | 有审计、观测、限流、回放、CI 回归 |
+
 ## 12 周学习安排
 
 | 周次 | 学习主题 | 产出 |
 | --- | --- | --- |
-| 第 1 周 | AI Agent 全景、大模型调用、Prompt | 一个基础问答 API |
-| 第 2 周 | Spring AI / LangChain4j、结构化输出、流式响应 | 一个 Java AI 服务骨架 |
+| 第 1 周 | AI Agent 全景、大模型调用、Prompt | 一个 FastAPI 基础问答 API |
+| 第 2 周 | Python AI 工程栈、结构化输出、流式响应 | 一个 Python AI 服务骨架 |
 | 第 3 周 | Tool Calling、工具权限、调用日志 | 3 个可调用业务工具 |
 | 第 4 周 | RAG 基础、文档解析、切片、向量库 | 知识库问答 MVP |
 | 第 5 周 | 高级 RAG、混合检索、Rerank | 检索增强版本 |
@@ -490,40 +415,54 @@
 | 第 7 周 | ReAct Agent、记忆、失败恢复 | 单 Agent 执行循环 |
 | 第 8 周 | Workflow、Plan-Execute、报告生成 | 深度研究工作流 |
 | 第 9 周 | MCP Server / Client | 企业工具 MCP 化 |
-| 第 10 周 | 多 Agent 架构 | BaseAgent + 任务路由 |
+| 第 10 周 | 多 Agent 架构 | BaseAgent + 任务路由雏形 |
 | 第 11 周 | 企业级工程化 | 权限、日志、评估、追踪 |
-| 第 12 周 | 项目整合与答辩 | Know-Engine + Dodo-Agent |
+| 第 12 周 | 项目整合与答辩 | Know-Engine 完整演示 + Dodo-Agent MVP 演示 |
+
+## Go 扩展学习安排
+
+Go 不作为前 12 周主线，但可以在以下节点接入：
+
+| 阶段 | Go 适合承担 | 原因 |
+| --- | --- | --- |
+| 第 5 周后 | 只读工具服务 | 工具边界清晰，适合稳定部署 |
+| 第 9 周 | MCP Server | MCP Go SDK 可用于企业系统适配 |
+| 第 11 周 | 高并发 API / Worker | Go 在并发、部署和资源占用上有优势 |
+| 项目实战 | 网关、权限服务、审计服务 | 业务边界稳定，适合和 Python Agent 解耦 |
+
+建议先完整走通 Python MVP，再把最稳定、最清晰的模块抽到 Go。不要在学习早期同时维护两套 Agent 编排逻辑。
 
 ## 学习资料总清单
 
 ### 官方文档
 
-- [Spring AI Reference Documentation](https://docs.spring.io/spring-ai/reference/)
-- [Spring AI Tool Calling](https://docs.spring.io/spring-ai/reference/api/tools.html)
-- [Spring AI ETL Pipeline](https://docs.spring.io/spring-ai/reference/api/etl-pipeline.html)
-- [Spring AI Vector Databases](https://docs.spring.io/spring-ai/reference/api/vectordbs.html)
-- [Spring AI MCP Overview](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-overview.html)
-- [LangChain4j Documentation](https://docs.langchain4j.dev/)
-- [LangChain4j RAG Tutorial](https://docs.langchain4j.dev/tutorials/rag/)
-- [LangChain4j Tools Tutorial](https://docs.langchain4j.dev/tutorials/tools/)
-- [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
-- [MCP Specification - Transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
-- [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
 - [OpenAI API Documentation](https://platform.openai.com/docs)
+- [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
+- [OpenAI SDKs](https://developers.openai.com/api/docs/libraries)
+- [Pydantic AI Documentation](https://ai.pydantic.dev/)
+- [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
+- [MCP SDKs](https://modelcontextprotocol.io/docs/sdk)
+- [Temporal Documentation](https://docs.temporal.io/)
+
+### RAG 与检索组件
+
+- [LlamaIndex Documentation](https://docs.llamaindex.ai/)
+- [LlamaIndex Evaluating](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/)
+- [Haystack Documentation](https://docs.haystack.deepset.ai/)
+- [RAGAS](https://docs.ragas.io/)
+- [DeepEval](https://docs.confident-ai.com/)
+- [pgvector](https://github.com/pgvector/pgvector)
+- [Elasticsearch kNN Search](https://www.elastic.co/guide/en/elasticsearch/reference/current/knn-search.html)
+- [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/)
+- [MinIO Documentation Repository](https://github.com/minio/docs)
 
 ### 论文与工程文章
 
 - [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401)
 - [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
-
-### 数据与检索组件
-
-- [pgvector](https://github.com/pgvector/pgvector)
-- [Elasticsearch kNN Search](https://www.elastic.co/guide/en/elasticsearch/reference/current/knn-search.html)
-- [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/)
-- [MinIO Documentation Repository](https://github.com/minio/docs)
-- [Redisson Documentation](https://redisson.pro/docs/)
 
 ## 课程设计重点
 
@@ -587,7 +526,8 @@ MCP 的价值是标准化工具、资源和提示词的接入方式。企业真�
 - **误区 2：所有任务都交给 Agent。** 正确做法是高确定性流程用 Workflow，不确定探索才用 Agent。
 - **误区 3：RAG 只做向量检索。** 企业场景通常需要全文检索、元数据过滤、权限过滤、重排和多源路由。
 - **误区 4：MCP 等于 Agent。** MCP 是工具协议，Agent 是执行策略，两者可以结合但不是同一层。
-- **误区 5：上线后再做观测。** AI 应用从第一版就要记录检索、工具、Prompt、token、耗时和失败原因。
+- **误区 5：一开始就 Python 和 Go 双主线。** 正确做法是先用 Python 跑通 Agent/RAG，再把稳定边界抽到 Go。
+- **误区 6：上线后再做观测。** AI 应用从第一版就要记录检索、工具、Prompt、token、耗时和失败原因。
 
 ## 最终作品集建议
 
@@ -598,6 +538,7 @@ MCP 的价值是标准化工具、资源和提示词的接入方式。企业真�
 - 一套 RAG 测试集和评估报告。
 - 一套 MCP Server 工具清单。
 - 一套 Agent 运行轨迹示例。
+- 一份 Python 主线与 Go 扩展的工程边界说明。
 - 一份线上部署与安全说明。
 
 这些材料比单纯代码更能体现你真正理解了企业级 AI Agent 的设计与落地。

@@ -1,6 +1,6 @@
 # 第 3 章：Prompt Engineering 与 Context Engineering
 
-更新时间：2026-06-03  
+更新时间：2026-06-16  
 建议学习时间：3-5 天  
 适合阶段：已经能完成基础模型调用，希望让回答更稳定、更可控  
 本章产出：一套提示词模板库、一份上下文组装策略、一组 Prompt 测试用例、一个可复用的 AI 学习助手 Prompt
@@ -116,7 +116,7 @@ flowchart LR
 
 约束：
 1. 使用中文回答。
-2. 面向有 Java / Spring Boot 基础的学习者。
+2. 面向有 Python / FastAPI 基础的学习者。
 3. 不要编造不存在的资料来源。
 4. 如果资料不足，请明确说明。
 5. 优先给出可实践的建议。
@@ -163,7 +163,7 @@ flowchart LR
 
 要求：
 1. 先给出一句话定义。
-2. 再给出一个企业级 Java / Spring Boot 场景中的例子。
+2. 再给出一个企业级 Python / FastAPI 场景中的例子。
 3. 列出 3 个常见误区。
 4. 给出一个 30 分钟内能完成的小练习。
 5. 如果该概念和 RAG、Workflow、Agent、MCP 有关系，请说明关系。
@@ -671,37 +671,38 @@ Prompt Injection 是用户试图通过输入覆盖系统规则或诱导模型泄
 
 这不能完全防御攻击，但能减少混淆。
 
-## 3.17 在 Spring AI 中使用 Prompt 模板
+## 3.17 在 Python 中使用 Prompt 模板
 
-Spring AI 支持把变量填入 prompt 模板。
+Python 项目里可以先用标准库字符串模板或 Jinja2 管理 prompt。初学阶段不建议一上来引入复杂 Prompt 平台，先把模板文件、版本号和测试用例管理清楚。
 
 示例：
 
-```java
-String template = """
-    你是 AI Agent 课程助教。
-    请解释概念：{concept}
+```python
+from string import Template
 
-    要求：
-    1. 给出一句话定义。
-    2. 给一个 Java 工程例子。
-    3. 列出 3 个常见误区。
-    """;
 
-String answer = chatClient.prompt()
-    .user(user -> user.text(template).param("concept", "RAG"))
-    .call()
-    .content();
+template = Template("""
+你是 AI Agent 课程助教。
+请解释概念：$concept
+
+要求：
+1. 给出一句话定义。
+2. 给一个 Python / FastAPI 工程例子。
+3. 列出 3 个常见误区。
+""".strip())
+
+prompt = template.substitute(concept="RAG")
 ```
 
 ### 更推荐的方式
 
-在真实项目中，不要把大型 prompt 写死在 Java 字符串里。建议：
+在真实项目中，不要把大型 prompt 写死在 Python 字符串里。建议：
 
-- 放到 `resources/prompts/`。
+- 放到 `app/prompts/` 或 `prompts/`。
 - 或放到配置中心。
 - 或放到数据库并支持版本管理。
 - 保留变更记录。
+- 为每个重要 prompt 准备 pytest 测试用例。
 
 ## 3.18 本章完整实践任务
 
@@ -869,7 +870,7 @@ notes/chapter-03-context-strategy.md
 - 能建立 prompt 测试用例。
 - 能说出 prompt 不能替代哪些工程机制。
 
-如果你能做到这些，再进入 Spring AI / LangChain4j 的框架学习会更清晰，因为你知道框架只是承载 prompt 和上下文的工具。
+如果你能做到这些，再进入 OpenAI Agents SDK、Pydantic AI、LangGraph 等框架学习会更清晰，因为你知道框架只是承载 prompt、上下文、工具和执行循环的工具。
 
 ## 3.21 本章学习资料
 
@@ -877,14 +878,15 @@ notes/chapter-03-context-strategy.md
 
 - [OpenAI Prompt Engineering Guide](https://platform.openai.com/docs/guides/prompt-engineering)
 - [OpenAI Structured Outputs Guide](https://platform.openai.com/docs/guides/structured-outputs)
-- [Spring AI Prompt API](https://docs.spring.io/spring-ai/reference/api/prompt.html)
-- [Spring AI Chat Client API](https://docs.spring.io/spring-ai/reference/api/chatclient.html)
+- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [Pydantic Documentation](https://docs.pydantic.dev/)
 
 ### 扩展资料
 
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 - [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
-- [LangChain4j Documentation](https://docs.langchain4j.dev/)
+- [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
+- [Pydantic AI Documentation](https://ai.pydantic.dev/)
 
 ## 3.22 本章复盘模板
 

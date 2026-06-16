@@ -1,6 +1,6 @@
 # 第 1 章：AI Agent 全景与学习路线
 
-更新时间：2026-05-26  
+更新时间：2026-06-16  
 建议学习时间：1-2 天  
 适合阶段：开始学习 AI Agent 前的第一个完整学习单元  
 本章产出：一份 Agent 概念笔记、一张系统架构图、一份场景分类表、一份 12 周个人学习计划
@@ -24,7 +24,8 @@
 
 ### 你需要具备的基础
 
-- 会阅读 Java / Spring Boot 项目代码。
+- 会阅读 Python Web 项目代码，理解 FastAPI 这类后端框架的基本结构。
+- 了解 Go 更好，但不是本课程前 12 周的必要条件。
 - 理解 HTTP API、数据库、缓存、消息队列、对象存储这些后端基础概念。
 - 知道大模型可以根据 prompt 生成文本，但不要求已经熟悉模型 API。
 - 能使用 Markdown 记录学习笔记。
@@ -736,7 +737,7 @@ notes/chapter-01-system-architecture.md
 ```mermaid
 flowchart TD
     User["用户"] --> Web["Web / IM 入口"]
-    Web --> API["Spring Boot API"]
+    Web --> API["FastAPI API"]
     API --> Agent["Agent / RAG 服务"]
     Agent --> Model["大模型"]
     Agent --> Tool["工具系统"]
@@ -795,7 +796,7 @@ notes/chapter-01-12-week-plan.md
 | 周次 | 学习主题 | 本周产出 | 验收方式 |
 | --- | --- | --- | --- |
 | 第 1 周 | AI Agent 全景、大模型调用、Prompt |  |  |
-| 第 2 周 | Spring AI / LangChain4j、结构化输出、流式响应 |  |  |
+| 第 2 周 | Python AI 工程栈、结构化输出、流式响应 |  |  |
 | 第 3 周 | Tool Calling、工具权限、调用日志 |  |  |
 | 第 4 周 | RAG 基础、文档解析、切片、向量库 |  |  |
 | 第 5 周 | 高级 RAG、混合检索、Rerank |  |  |
@@ -833,8 +834,11 @@ notes/chapter-01-12-week-plan.md
 3. [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)  
    重点理解 MCP 的 Host、Client、Server，以及 Tools、Resources、Prompts。
 
-4. [LangChain4j Documentation](https://docs.langchain4j.dev/)  
-   重点建立 Java 生态下 LLM 应用、RAG、Tools、AI Services 的整体印象。
+4. [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)  
+   重点建立 Python 生态下 Agent、Tools、Handoff、Tracing 的整体印象。
+
+5. [Pydantic AI Documentation](https://ai.pydantic.dev/)  
+   重点理解如何用 Python 类型系统管理 Agent 输入、输出和工具参数。
 
 ### 扩展资料
 
@@ -844,8 +848,11 @@ notes/chapter-01-12-week-plan.md
 2. [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401)  
    重点理解 RAG 为什么能缓解模型知识缺失问题。
 
-3. [Spring AI Reference Documentation](https://docs.spring.io/spring-ai/reference/)  
-   暂时只浏览目录，知道后续会用它学习 Chat Client、Tool Calling、RAG 和 MCP。
+3. [FastAPI Documentation](https://fastapi.tiangolo.com/)  
+   暂时只浏览目录，知道后续会如何用 Python Web 服务承载模型调用、工具调用和流式输出。
+
+4. [Model Context Protocol SDKs](https://modelcontextprotocol.io/docs/sdk)  
+   重点确认 Python 与 Go 都可以实现 MCP Server / Client，为后续技术边界做准备。
 
 ## 1.16 本章自测题
 
