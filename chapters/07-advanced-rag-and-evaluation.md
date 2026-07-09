@@ -1,6 +1,6 @@
 # 第 7 章：高级 RAG：检索增强、多源路由与评估
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：7-10 天  
 适合阶段：已经完成基础 RAG MVP，但发现召回、引用、表格、多源数据和效果评估仍不稳定  
 本章产出：一个支持查询改写、混合检索、rerank、多源路由和回归评估的 RAG 增强版
@@ -307,7 +307,21 @@ class RetrievalRoute(BaseModel):
 }
 ```
 
-第 7 章建议先用规则指标和人工抽检，不急着引入复杂自动评委。后续可以比较 RAGAS、DeepEval、LlamaIndex evaluation。
+第 7 章建议先用规则指标和人工抽检，不急着引入复杂自动评委。后续可以比较 RAGAS、DeepEval、LlamaIndex evaluation、Pydantic Evals。
+
+### 评估结果如何进入工程链路
+
+评估不是一次性报告，而应该进入日常开发：
+
+| 环节 | 做法 |
+| --- | --- |
+| 本地开发 | 小评估集快速跑，验证切片、检索、prompt 改动 |
+| CI | 每次合并前跑核心 case，至少检查拒答、引用和权限过滤 |
+| 线上观测 | 用 trace 记录 query、route、retrieval hits、answer、citations |
+| 失败回流 | 将线上差评、无引用、资料不足误答样本加入评估集 |
+| 版本对比 | 保存模型、embedding、rerank、prompt、检索策略版本 |
+
+Pydantic Evals、Logfire、OpenTelemetry 可以分别承担数据集评估、运行时观测和分布式追踪；它们不是必须同时引入，但课程项目至少要保留可扩展接口。
 
 ## 7.12 回归测试集设计
 
@@ -392,6 +406,8 @@ class RetrievalRoute(BaseModel):
 - [LlamaIndex Evaluating](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/)
 - [RAGAS](https://docs.ragas.io/)
 - [DeepEval](https://docs.confident-ai.com/)
+- [Pydantic Evals](https://pydantic.dev/docs/ai/evals/evals/)
+- [Pydantic Logfire](https://pydantic.dev/logfire)
 - [Elasticsearch kNN Search](https://www.elastic.co/guide/en/elasticsearch/reference/current/knn-search.html)
 - [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/)
 - [pgvector](https://github.com/pgvector/pgvector)

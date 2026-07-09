@@ -1,9 +1,9 @@
 # 第 10 章：MCP 基础与接入
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：5-7 天  
 适合阶段：已经实现本地工具调用，希望把企业工具和数据源标准化接入 Agent 平台  
-本章产出：一个 Python MCP Server、一个 MCP Client 接入示例、一个可选 Go MCP Server 设计、一份 MCP 工具安全清单
+本章产出：一个 Python MCP Server、一个 MCP Client 接入示例、一个可选 Go MCP Server 设计、一份 MCP 工具安全清单、一份 MCP Server 信任与授权说明
 
 ## 10.1 本章学习目标
 
@@ -17,8 +17,11 @@
 6. 判断哪些工具适合做成本地 function tool，哪些适合做成 MCP Server。
 7. 设计 MCP 工具的权限、审计、限流和信任边界。
 8. 知道何时用 Go 实现 MCP Server。
+9. 了解 remote MCP、MCP Authorization、MCP Apps 与 Apps SDK 的关系。
 
 MCP 是工具和上下文接入协议，不是 Agent 本身，也不是权限系统本身。
+
+![MCP 工具接入边界](../assets/agent-ecosystem-illustrations/02-mcp-boundary.png)
 
 ## 10.2 MCP 解决什么问题
 
@@ -61,6 +64,8 @@ MCP Server 不应该直接信任模型。它接收的是工具调用请求，但
 
 本课程第 10 章先做 Tools。Resources 和 Prompts 放到平台化阶段再深入。
 
+2026 年需要额外知道的是：MCP 也在向交互式结果发展。MCP Apps / Apps SDK 可以让工具结果返回结构化数据和 UI 组件，但这属于体验层扩展；它不改变 MCP Server 必须做权限、审计和限流的基本原则。
+
 ## 10.5 Transport 选择
 
 | Transport | 适合场景 |
@@ -70,6 +75,10 @@ MCP Server 不应该直接信任模型。它接收的是工具调用请求，但
 | 旧 HTTP+SSE | 兼容历史实现，作为了解即可 |
 
 学习阶段优先 stdio，因为最容易调试。企业部署阶段再考虑 Streamable HTTP。
+
+如果要接入 OpenAI Responses API 的 remote MCP，优先选择支持 Streamable HTTP 的 MCP Server，并确认认证、工具白名单、调用日志和超时策略已经配置好。
+
+截至 2026-07-09，课程稳定基线仍建议使用 MCP `2025-11-25` 规范；`2026-07-28` release candidate 可作为观察项，用来了解 Tasks、Extensions、MCP Apps 和授权强化方向，但不建议初学者直接按 RC 改造主项目。
 
 ## 10.6 什么时候用 MCP
 
@@ -219,6 +228,20 @@ MCP Server 必须自己做安全控制：
 
 不要因为工具通过 MCP 暴露，就默认它是安全的。
 
+### MCP Authorization 与业务权限
+
+MCP Authorization 解决的是客户端、资源服务器、授权服务器之间如何安全授权的问题。业务权限仍然要由 MCP Server 或后端系统强制执行。
+
+| 层级 | 负责什么 |
+| --- | --- |
+| MCP Authorization | 谁可以连接这个 Server、获取什么 token、代表哪个用户 |
+| Server 信任列表 | 当前 Agent 平台允许连接哪些 MCP Server |
+| 工具风险等级 | 某个工具是否只读、是否高风险、是否需要人工确认 |
+| 业务权限 | 用户是否能查这个订单、文档、报表或客户数据 |
+| 审计日志 | 谁在何时调用了什么工具，参数和结果摘要是什么 |
+
+不要只在 prompt 里写“不要越权”。越权检查必须在 Server 侧或业务系统侧完成。
+
 ## 10.12 Python 与 Go 的分工
 
 Python MCP Server 适合：
@@ -278,7 +301,27 @@ create table mcp_tools (
 
 Agent 只能使用已启用、已授权、风险等级允许的工具。
 
-## 10.14 MVP / 进阶 / 生产化验收
+## 10.14 MCP Apps 与 Apps SDK
+
+MCP Apps / Apps SDK 的价值是把工具结果从“纯文本”升级为“可交互界面”。例如：
+
+- 查询订单后返回订单状态卡片。
+- 检索知识库后返回引用列表和筛选器。
+- 报告生成后返回进度、章节树和下载入口。
+- 数据分析后返回图表组件和追问按钮。
+
+但它不应该在第 10 章抢主线。学习顺序建议：
+
+```text
+MCP Tools 跑通
+  -> 工具 schema、权限、日志稳定
+  -> Streamable HTTP / remote MCP
+  -> MCP Apps / Apps SDK 交互式结果
+```
+
+如果工具结果还不稳定，不要先做 UI 组件；否则会把问题混在模型、工具、协议和前端四层里。
+
+## 10.15 MVP / 进阶 / 生产化验收
 
 ### MVP
 
@@ -300,10 +343,11 @@ Agent 只能使用已启用、已授权、风险等级允许的工具。
 - 有 MCP Server Registry。
 - 有工具风险等级。
 - 有 Server 可信列表。
+- 有 MCP Authorization 或等价的连接授权方案。
 - Go 实现至少一个稳定企业工具 Server。
 - 权限、限流、审计在 Server 侧强制执行。
 
-## 10.15 常见误区
+## 10.16 常见误区
 
 - 把 MCP 当成 Agent。
 - 把 MCP 当成权限系统。
@@ -311,15 +355,23 @@ Agent 只能使用已启用、已授权、风险等级允许的工具。
 - MCP 工具返回敏感字段。
 - 让 Agent 连接任意未知 MCP Server。
 - 没有用 Inspector 调试工具 schema。
+- 先做 MCP Apps UI，但工具 schema、权限和日志还没有稳定。
 
-## 10.16 本章学习资料
+## 10.17 本章学习资料
 
 - [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
 - [MCP SDKs](https://modelcontextprotocol.io/docs/sdk)
-- [MCP Specification - Transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [MCP Specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)
+- [MCP Specification 2026-07-28 Release Candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
+- [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector)
+- [MCP Authorization](https://modelcontextprotocol.io/docs/tutorials/security/authorization)
+- [MCP Apps](https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/)
+- [OpenAI Responses API - Remote MCP](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
+- [OpenAI Apps SDK](https://developers.openai.com/apps-sdk)
 - [OpenAI Agents SDK - Tools](https://openai.github.io/openai-agents-python/tools/)
 
-## 10.17 本章复盘模板
+## 10.18 本章复盘模板
 
 ```markdown
 # 第 10 章复盘
@@ -339,4 +391,8 @@ Agent 只能使用已启用、已授权、风险等级允许的工具。
 ## MCP Server 做了哪些权限和审计
 
 ## 我如何限制 Agent 只能使用可信 MCP Server
+
+## MCP Authorization 和业务权限如何分工
+
+## 哪些结果未来适合做成 MCP Apps / Apps SDK UI
 ```

@@ -1,6 +1,6 @@
 # Python / Go 技术路线可行性说明
 
-更新时间：2026-06-16
+更新时间：2026-07-09
 
 ## 结论
 
@@ -16,6 +16,8 @@ Python 跑通模型调用、Prompt、Tool Calling、RAG、Agent、Workflow、MCP
 
 不建议一开始就用 Go 作为 Agent 学习主线，也不建议一开始就 Python + Go 双主线并行。前者会降低学习效率，后者会让调试和知识迁移成本过高。
 
+2026 年生态变化没有改变这个结论。Google ADK、MCP Go SDK、A2A 等能力让 Go 在企业工具层和互操作层更有价值，但 Python 仍然是学习 Agent/RAG/评估/编排的最高效率主线。
+
 ## 为什么主线选择 Python
 
 ### 生态可行性
@@ -29,6 +31,7 @@ Python 在 AI Agent 学习和原型落地上更成熟：
 - LlamaIndex、LangChain、Haystack 在 RAG、文档解析、数据连接器上积累多。
 - MCP Python SDK 适合快速实现 MCP Server / Client。
 - pytest、RAGAS、DeepEval 等工具方便做回归测试和评估。
+- Pydantic AI、Pydantic Evals、Logfire 等工具让类型、评估和观测更容易形成闭环。
 
 ### 学习可行性
 
@@ -60,6 +63,7 @@ Go 不适合替代 Python 的学习主线，但很适合作为工程扩展层。
 | 模块 | 为什么适合 Go |
 | --- | --- |
 | MCP Server | 输入输出边界清晰，适合包装企业内部系统 |
+| A2A / ADK 工具侧适配 | Go 适合实现稳定、低资源占用的企业连接器 |
 | 工具微服务 | 天气、订单、库存、审批等服务可以独立部署 |
 | API 网关 | 高并发、低资源占用、部署简单 |
 | 后台 worker | 批处理、定时任务、消息消费适合 Go 并发模型 |

@@ -1,6 +1,6 @@
 # AI Agent 学习大纲与课程设计
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 适用对象：想系统学习企业级 AI Agent、RAG、MCP 与多智能体应用开发，并希望快速落地项目的后端/全栈工程师。
 
 ## 课程定位
@@ -18,6 +18,8 @@
 1. **Know-Engine：企业级知识库问答系统**，作为 12 周主项目。
 2. **Dodo-Agent：企业级端到端通用智能体平台**，作为进阶 MVP 和后续扩展方向。
 
+![AI Agent 学习路线](assets/agent-ecosystem-illustrations/01-learning-route.png)
+
 ## 技术路线结论
 
 | 选择 | 结论 | 原因 |
@@ -29,6 +31,17 @@
 本课程默认使用 Python 完成核心学习任务；每个关键阶段会标注 Go 的可选落地点。
 
 详细论证见：[Python / Go 技术路线可行性说明](docs/python-go-feasibility.md)。
+
+## 2026 生态更新判断
+
+截至 2026-07-09，Agent 生态已经从“单框架能力比拼”进入“运行时、工具协议、评估与互操作”并重的阶段。本资料需要吸收这些变化，但不改变课程主线：
+
+- **OpenAI 方向**：Responses API、Agents SDK、内置工具、remote MCP、Background mode 和 Apps SDK 已经成为 OpenAI Agent 应用的重要组合。
+- **MCP 方向**：MCP 当前稳定规范应以 `2025-11-25` 为准，学习时要同时关注 Inspector、Authorization、Streamable HTTP、MCP Apps 和可信 Server 管理。
+- **MCP 观察项**：`2026-07-28` MCP Specification Release Candidate 已经发布为候选方向，但截至本资料更新日不作为课程稳定基线。
+- **框架方向**：Pydantic AI、LangGraph 仍适合 Python 主线；Google ADK、Microsoft Agent Framework、Claude Agent SDK 更适合作为进阶对比和企业生态视野。
+- **互操作方向**：MCP 解决工具和上下文接入，A2A 解决 Agent 间协作，Apps SDK / MCP Apps 解决交互式结果展示。它们是扩展层，不应抢走前 8 周的基础训练。
+- **评估方向**：RAGAS、DeepEval 之外，应补充 Pydantic Evals、Logfire、OpenTelemetry 和 trace 回放，让学习者从第一版就建立可验证意识。
 
 ## 学习目标
 
@@ -48,18 +61,18 @@
 | 层级 | 推荐技术 |
 | --- | --- |
 | 主语言与 Web 框架 | Python 3.12+、FastAPI、Uvicorn、Pydantic |
-| 模型接入 | OpenAI API、兼容 OpenAI 协议的模型服务、本地模型服务 |
-| Agent 编排 | OpenAI Agents SDK、Pydantic AI、LangGraph；进阶可比较 AutoGen、CrewAI |
+| 模型接入 | OpenAI Responses API / SDK、兼容 OpenAI 协议的模型服务、本地模型服务 |
+| Agent 编排 | OpenAI Agents SDK、Pydantic AI、LangGraph；进阶比较 Google ADK、Microsoft Agent Framework、Claude Agent SDK |
 | RAG 框架 | 优先先自研最小链路；进阶比较 LlamaIndex、LangChain、Haystack |
-| Agent 协议 | MCP，重点学习 stdio 与 Streamable HTTP；旧 HTTP+SSE 作为兼容知识 |
+| Agent 协议 | MCP，重点学习 stdio 与 Streamable HTTP；A2A 作为多 Agent 互操作扩展；旧 HTTP+SSE 作为兼容知识 |
 | MCP 实现 | MCP Python SDK；Go 扩展使用 MCP Go SDK |
 | 检索与存储 | PostgreSQL + pgvector、Elasticsearch / OpenSearch、Neo4j、SQLite、MySQL |
 | 文件与对象存储 | MinIO 或 S3 兼容存储 |
 | 缓存与并发控制 | Redis、RQ / Celery / Dramatiq，或 Go worker |
 | 文档处理 | pypdf、python-docx、openpyxl、pandas、BeautifulSoup、unstructured |
 | 任务与调度 | APScheduler、Celery Beat、Temporal；Go 可选 Asynq / cron |
-| 观测与评估 | OpenTelemetry、structlog、pytest、RAGAS / DeepEval、Agent trace |
-| 交互体验 | SSE / WebSocket 流式输出、任务进度、会话管理、引用来源展示 |
+| 观测与评估 | OpenTelemetry、structlog、pytest、RAGAS / DeepEval、Pydantic Evals / Logfire、Agent trace |
+| 交互体验 | SSE / WebSocket 流式输出、任务进度、会话管理、引用来源展示；进阶学习 Apps SDK / MCP Apps |
 | Go 扩展位置 | MCP Server、工具微服务、API 网关、批处理 worker、企业系统适配器 |
 
 ## 课程结构总览
@@ -130,6 +143,7 @@
 
 - 掌握 Python 生态下构建 AI 应用的常见路线。
 - 理解 OpenAI SDK、OpenAI Agents SDK、Pydantic AI、LangGraph、LlamaIndex 的定位差异。
+- 了解 Google ADK、Microsoft Agent Framework、Claude Agent SDK 这类进阶框架为什么不是前期主线。
 - 能根据项目阶段选择“少框架自研”还是“引入编排框架”。
 
 ### 实战任务
@@ -148,6 +162,7 @@
 - 让模型能够安全调用业务函数、外部 API、数据库查询能力。
 - 理解工具定义、参数校验、权限控制和调用回放。
 - 使用 Python function tool 与 Pydantic schema 管理工具边界。
+- 了解 remote MCP、内置工具、tool search 等工具生态演进方向。
 
 ### 实战任务
 
@@ -262,6 +277,7 @@
 
 - 用 MCP Python SDK 实现第一个 stdio MCP Server。
 - 用 MCP Inspector 调试工具列表和调用结果。
+- 使用 MCP Authorization 思路区分协议授权、业务权限和工具风险控制。
 - 可选用 Go 实现高性能 MCP Server，暴露订单查询、库存查询、权限查询等只读工具。
 
 ### 实战任务
@@ -272,16 +288,23 @@
 
 ## 第 11 章：多 Agent 架构设计
 
+详细学习文档：[第 11 章：Agent 互操作与多 Agent 架构设计](chapters/11-agent-interoperability.md)
+
+![Agent 互操作生态](assets/agent-ecosystem-illustrations/03-agent-interop.png)
+
 ### 学习目标
 
 - 设计一个可扩展的多智能体平台，而不是把所有能力塞进一个 Agent。
 - 掌握 BaseAgent、Agent Registry、任务路由、Agent 协作。
+- 理解 MCP、A2A、Apps SDK / MCP Apps 各自解决哪一层问题。
+- 能比较 OpenAI Agents SDK、Pydantic AI、LangGraph、Google ADK、Microsoft Agent Framework 的适用边界。
 
 ### 推荐实现
 
 - 使用 OpenAI Agents SDK 的 handoff 或自定义 registry 实现 Agent 路由。
 - 每个 Agent 只负责一个清晰能力：知识库问答、Web 搜索、报告生成、文件分析。
 - Agent 之间传递结构化结果，而不是整段自由文本。
+- 可选：调研 A2A 作为跨 Agent 协作协议，但不在 12 周主线里强制实现。
 
 ### 实战任务
 
@@ -301,6 +324,7 @@
 - FastAPI 使用 SSE 或 WebSocket 输出模型 token、工具状态、任务进度。
 - 前端展示引用、工具调用轨迹、失败原因和可重试入口。
 - 企业 IM 入口只做鉴权、消息适配和任务提交，不承载复杂 Agent 逻辑。
+- 进阶：使用 Apps SDK / MCP Apps 思路，把结构化工具结果渲染成可交互组件。
 
 ### 实战任务
 
@@ -415,7 +439,7 @@
 | 第 7 周 | ReAct Agent、记忆、失败恢复 | 单 Agent 执行循环 |
 | 第 8 周 | Workflow、Plan-Execute、报告生成 | 深度研究工作流 |
 | 第 9 周 | MCP Server / Client | 企业工具 MCP 化 |
-| 第 10 周 | 多 Agent 架构 | BaseAgent + 任务路由雏形 |
+| 第 10 周 | 多 Agent 架构与互操作 | BaseAgent + 任务路由雏形，完成 MCP / A2A / Apps 的边界说明 |
 | 第 11 周 | 企业级工程化 | 权限、日志、评估、追踪 |
 | 第 12 周 | 项目整合与答辩 | Know-Engine 完整演示 + Dodo-Agent MVP 演示 |
 
@@ -436,14 +460,28 @@ Go 不作为前 12 周主线，但可以在以下节点接入：
 
 ### 官方文档
 
-- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [OpenAI API Documentation](https://developers.openai.com/api/docs)
+- [OpenAI Responses API - Tools](https://developers.openai.com/api/docs/guides/tools)
+- [OpenAI Responses API - Remote MCP](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
+- [OpenAI Background Mode](https://developers.openai.com/api/docs/guides/background)
 - [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
+- [OpenAI Apps SDK](https://developers.openai.com/apps-sdk)
 - [OpenAI SDKs](https://developers.openai.com/api/docs/libraries)
 - [Pydantic AI Documentation](https://ai.pydantic.dev/)
+- [Pydantic AI Durable Execution](https://pydantic.dev/docs/ai/integrations/durable_execution/overview/)
+- [Pydantic Evals](https://pydantic.dev/docs/ai/evals/evals/)
 - [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
+- [MCP Specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)
+- [MCP Specification 2026-07-28 Release Candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
 - [MCP SDKs](https://modelcontextprotocol.io/docs/sdk)
+- [MCP Authorization](https://modelcontextprotocol.io/docs/tutorials/security/authorization)
+- [MCP Apps](https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/)
+- [Google Agent Development Kit](https://adk.dev/)
+- [Google A2A Protocol](https://adk.dev/a2a/)
+- [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/overview/)
+- [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)
 - [Temporal Documentation](https://docs.temporal.io/)
 
 ### RAG 与检索组件
@@ -528,6 +566,7 @@ MCP 的价值是标准化工具、资源和提示词的接入方式。企业真�
 - **误区 4：MCP 等于 Agent。** MCP 是工具协议，Agent 是执行策略，两者可以结合但不是同一层。
 - **误区 5：一开始就 Python 和 Go 双主线。** 正确做法是先用 Python 跑通 Agent/RAG，再把稳定边界抽到 Go。
 - **误区 6：上线后再做观测。** AI 应用从第一版就要记录检索、工具、Prompt、token、耗时和失败原因。
+- **误区 7：看到新协议就改主线。** MCP、A2A、Apps SDK 都很重要，但前提是你已经有稳定工具、清晰状态和可验证结果。
 
 ## 最终作品集建议
 
@@ -538,6 +577,7 @@ MCP 的价值是标准化工具、资源和提示词的接入方式。企业真�
 - 一套 RAG 测试集和评估报告。
 - 一套 MCP Server 工具清单。
 - 一套 Agent 运行轨迹示例。
+- 一份 Agent 框架与协议选型说明。
 - 一份 Python 主线与 Go 扩展的工程边界说明。
 - 一份线上部署与安全说明。
 

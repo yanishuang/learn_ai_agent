@@ -1,6 +1,6 @@
 # 第 5 章：Tool Calling / Function Calling
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：5-7 天  
 适合阶段：已经能完成模型调用和 Prompt 管理，准备让模型使用外部工具  
 本章产出：3 个可调用工具、一个 Tool Calling API、一套工具权限校验、一张工具调用日志表、一份危险工具安全清单
@@ -18,6 +18,7 @@
 7. 识别哪些工具不能让模型自动执行。
 8. 实现天气查询、订单查询、知识库搜索 3 个示例工具。
 9. 知道何时可以把稳定工具服务抽到 Go 或 MCP Server。
+10. 了解 built-in tools、remote MCP、tool search 等现代工具入口的适用边界。
 
 Tool Calling 是 Agent 的基础。没有工具，Agent 只能说；有了工具，Agent 才能查、算、读、写、执行。
 
@@ -429,6 +430,28 @@ TOOLS = {
 - 能统一做日志。
 - 能逐步迁移到 MCP Server。
 
+### 5.12.1 现代工具入口：内置工具、remote MCP 与 tool search
+
+2026 年的 Agent 工具生态已经不只是一组本地 Python 函数。学习时可以按下面三层理解：
+
+| 类型 | 例子 | 适合场景 | 注意事项 |
+| --- | --- | --- | --- |
+| 本地 function tool | 天气、订单、课程知识库搜索 | 学习、快速实验、工具边界还在变化 | 后端必须做参数和权限校验 |
+| remote MCP tool | 企业知识库、CRM、工单、报表系统 | 工具需要被多个 Agent / 应用复用 | 需要可信 Server、授权、审计和限流 |
+| built-in tool | Web search、file search、code interpreter、deep research 等 | 平台已提供的通用能力 | 仍要记录来源、成本和失败状态 |
+
+当工具数量变多时，不要把所有工具一次性塞给模型。推荐做法：
+
+1. 先用规则或路由模型筛选候选工具。
+2. 再把少量相关工具暴露给当前 run。
+3. 对高风险工具强制人工确认。
+4. 对工具选择、参数和结果做 trace。
+5. 对大量工具或 MCP Server 使用 tool search / tool registry 思路，按需发现和加载。
+
+这能避免上下文膨胀、工具误选和调用成本失控。
+
+注意：tool search、built-in tools、remote MCP 的具体可用性会受模型、账号、平台和 SDK 版本影响。课程里学习的是设计思想和工程边界，真实项目要以当前官方文档和运行环境为准。
+
 ## 5.13 参数校验
 
 参数校验至少包括：
@@ -795,7 +818,8 @@ Python 普通函数
 ### 必读资料
 
 - [OpenAI Agents SDK - Tools](https://openai.github.io/openai-agents-python/tools/)
-- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [OpenAI Responses API - Tools](https://developers.openai.com/api/docs/guides/tools)
+- [OpenAI Responses API - Remote MCP](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
 - [Pydantic Documentation](https://docs.pydantic.dev/)
 - [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
 

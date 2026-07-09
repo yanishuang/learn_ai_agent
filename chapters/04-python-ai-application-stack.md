@@ -1,6 +1,6 @@
 # 第 4 章：Python AI 应用工程栈
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：3-5 天  
 适合阶段：已经能调用模型、能写基础 Prompt，希望进入 Python AI 应用工程化  
 本章产出：一个 OpenAI SDK 问答服务、一个 Agents SDK 概念解释 Agent、一份框架取舍报告、一套 AI 应用分层设计
@@ -18,6 +18,8 @@
 7. 避免把框架 API 当作 Agent 能力本身。
 
 本章重点不是“哪个框架最强”，而是学会用 Python 工程方式组织 AI 应用。
+
+![Agent 框架与互操作生态](../assets/agent-ecosystem-illustrations/03-agent-interop.png)
 
 ## 4.2 Python AI 生态里的核心选择
 
@@ -53,6 +55,9 @@ Pydantic AI 强调类型安全和结构化输出。它适合：
 - 管理工具参数。
 - 对接不同模型提供商。
 - 快速写出可测试的 Python Agent。
+- 建立 eval dataset、在线评估和 LLM judge。
+- 结合 Logfire 做 trace、span 和运行时观测。
+- 对长任务使用 durable execution 思路，减少重启和 transient failure 的影响。
 
 如果你的团队重视类型、校验和测试，它很值得学习。
 
@@ -76,6 +81,24 @@ LangGraph 更适合有状态、多步骤、可恢复的工作流和 Agent 图。
 2. 再比较 LlamaIndex、LangChain、Haystack 的实现方式。
 3. 项目里只引入真正减少复杂度的部分。
 
+### 2026 年需要知道的新选择
+
+下面这些框架和协议值得了解，但不建议在课程前 8 周抢主线：
+
+| 方向 | 代表 | 适合场景 | 课程定位 |
+| --- | --- | --- | --- |
+| Agent 运行时 | OpenAI Agents SDK | 工具、handoff、trace、guardrails | 主线学习 |
+| 类型安全 Agent | Pydantic AI | Python 团队、结构化输出、evals、Logfire | 主线补强 |
+| 有状态编排 | LangGraph | 可恢复 Workflow、human-in-the-loop、多节点图 | 第 9 章重点 |
+| 企业多 Agent | Google ADK | GCP / Google 生态、A2A、多语言 Agent | 进阶比较 |
+| 企业工作流 Agent | Microsoft Agent Framework | Azure / .NET / Python、多 Agent workflow、MCP/A2A 互操作 | 进阶比较 |
+| Coding-agent runtime | Claude Agent SDK | 把 Claude Code 式 agent loop 嵌入产品 | 进阶参考 |
+| 工具互操作 | MCP | 标准化工具、资源、提示词接入 | 第 10 章重点 |
+| Agent 互操作 | A2A | Agent 与 Agent 跨系统协作 | 第 11 章扩展 |
+| 交互式结果 | Apps SDK / MCP Apps | 工具结果渲染为交互式 UI | 第 12 章扩展 |
+
+判断原则：**先让一个 Python Agent 能稳定完成任务，再考虑跨框架、跨协议、跨平台互操作。**
+
 ## 4.3 框架对比
 
 | 维度 | OpenAI SDK | OpenAI Agents SDK | Pydantic AI | LangGraph | LlamaIndex |
@@ -96,6 +119,7 @@ OpenAI SDK 打地基
   -> 自研最小 RAG 理解链路
   -> LangGraph 处理复杂工作流
   -> LlamaIndex / Haystack 补数据连接器
+  -> MCP / A2A / Apps 处理互操作和体验
 ```
 
 ## 4.4 推荐项目分层
@@ -305,6 +329,8 @@ async def explain_with_agent(concept: str) -> str:
 - 输出结构复杂。
 - 需要跨模型提供商。
 - 希望工具参数和返回值都是强类型。
+- 需要把 eval、trace、span 和运行结果纳入统一工程链路。
+- 需要 durable execution、streamed structured output 或 human-in-the-loop 这类更完整的运行时能力。
 
 ### 优先 LangGraph 的情况
 
@@ -319,6 +345,15 @@ async def explain_with_agent(concept: str) -> str:
 - 数据连接器很多。
 - RAG 链路不是项目差异化核心。
 - 你已经理解基础 RAG，想节省工程时间。
+
+### 只做进阶比较的情况
+
+Google ADK、Microsoft Agent Framework、Claude Agent SDK 不建议成为本课程早期主线。它们更适合在你已经理解 Tool Calling、RAG、Workflow、MCP 之后，用来回答这些问题：
+
+- 我的团队是否已经深度绑定 Google Cloud、Azure、Claude Code 或某个企业生态？
+- 我是否真的需要跨 Agent 协议互操作，而不只是单应用内部路由？
+- 我是否需要把 Agent 工作流和企业审批、身份、审计系统深度绑定？
+- 引入新框架后，评估、trace、权限和失败恢复是否更清楚，而不是更分散？
 
 ## 4.10 常见工程误区
 
@@ -463,7 +498,12 @@ async def explain_with_agent(concept: str) -> str:
 ### 扩展资料
 
 - [Pydantic AI Documentation](https://ai.pydantic.dev/)
+- [Pydantic AI Durable Execution](https://pydantic.dev/docs/ai/integrations/durable_execution/overview/)
+- [Pydantic Evals](https://pydantic.dev/docs/ai/evals/evals/)
 - [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview)
+- [Google Agent Development Kit](https://adk.dev/)
+- [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/overview/)
+- [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)
 - [LlamaIndex Documentation](https://docs.llamaindex.ai/)
 - [MCP SDKs](https://modelcontextprotocol.io/docs/sdk)
 

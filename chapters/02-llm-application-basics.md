@@ -1,6 +1,6 @@
 # 第 2 章：大模型应用基础
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：3-5 天  
 适合阶段：已经理解 AI Agent 全景，准备开始动手调用大模型  
 本章产出：一个 FastAPI 大模型问答 API、一个结构化输出接口、一个 SSE 流式响应接口、一份调用日志与错误处理清单
@@ -12,7 +12,7 @@
 1. 解释大模型应用的一次完整调用链路。
 2. 区分 system、user、assistant、tool 消息的职责。
 3. 理解 temperature、top_p、max tokens、上下文窗口、流式输出的作用。
-4. 使用 Python + OpenAI SDK 完成一次基础模型调用。
+4. 使用 Python + OpenAI SDK / Responses API 完成一次基础模型调用。
 5. 使用 Pydantic 校验模型结构化输出。
 6. 使用 FastAPI + SSE 把模型输出实时推送给前端。
 7. 为模型调用增加基础错误处理、超时、日志和成本意识。
@@ -627,8 +627,10 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 
 ### 必读资料
 
-- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [OpenAI API Documentation](https://developers.openai.com/api/docs)
 - [OpenAI SDKs](https://developers.openai.com/api/docs/libraries)
+- [OpenAI Responses API - Tools](https://developers.openai.com/api/docs/guides/tools)
+- [OpenAI Background Mode](https://developers.openai.com/api/docs/guides/background)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [Pydantic Documentation](https://docs.pydantic.dev/)
 

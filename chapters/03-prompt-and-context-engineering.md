@@ -1,6 +1,6 @@
 # 第 3 章：Prompt Engineering 与 Context Engineering
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：3-5 天  
 适合阶段：已经能完成基础模型调用，希望让回答更稳定、更可控  
 本章产出：一套提示词模板库、一份上下文组装策略、一组 Prompt 测试用例、一个可复用的 AI 学习助手 Prompt
@@ -876,9 +876,9 @@ notes/chapter-03-context-strategy.md
 
 ### 必读资料
 
-- [OpenAI Prompt Engineering Guide](https://platform.openai.com/docs/guides/prompt-engineering)
-- [OpenAI Structured Outputs Guide](https://platform.openai.com/docs/guides/structured-outputs)
-- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [OpenAI Prompt Engineering Guide](https://developers.openai.com/api/docs/guides/prompt-engineering)
+- [OpenAI Structured Outputs Guide](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [OpenAI API Documentation](https://developers.openai.com/api/docs)
 - [Pydantic Documentation](https://docs.pydantic.dev/)
 
 ### 扩展资料

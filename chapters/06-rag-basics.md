@@ -1,6 +1,6 @@
 # 第 6 章：RAG 基础：从文档到答案
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：7-10 天  
 适合阶段：已经能完成模型调用、Prompt 管理和 Tool Calling，准备构建企业知识库问答 MVP  
 本章产出：一个可运行的基础 RAG 服务，支持文档上传、解析、切片、向量化、检索、生成答案和引用溯源
@@ -465,7 +465,7 @@ evals/rag_cases.jsonl
 - [pgvector](https://github.com/pgvector/pgvector)
 - [LlamaIndex Documentation](https://docs.llamaindex.ai/)
 - [Haystack Documentation](https://docs.haystack.deepset.ai/)
-- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [OpenAI API Documentation](https://developers.openai.com/api/docs)
 
 ## 6.17 本章复盘模板
 

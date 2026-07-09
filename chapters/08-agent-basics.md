@@ -1,6 +1,6 @@
 # 第 8 章：Agent 基础：执行循环、工具、记忆与 Trace
 
-更新时间：2026-06-16  
+更新时间：2026-07-09
 建议学习时间：5-7 天  
 适合阶段：已经完成 Tool Calling 和基础 RAG，准备让系统从“一次问答”升级为“多步任务执行”  
 本章产出：一个受控单 Agent，可调用天气、订单、知识库检索工具，具备停止条件、失败处理和运行轨迹记录
@@ -16,6 +16,7 @@
 5. 记录 Agent run、每轮 step、工具调用和最终状态。
 6. 设计短期记忆和摘要记忆，不滥用长期记忆。
 7. 用测试问题验证 Agent 是否真的基于工具结果回答。
+8. 了解 Sessions、human-in-the-loop、background mode 等现代 Agent runtime 能力。
 
 本章重点是“可控 Agent”，不是追求模型看起来多聪明。
 
@@ -162,7 +163,27 @@ async def run_course_agent(question: str) -> str:
 - Agent instructions 不能替代后端规则。
 - 工具返回要结构化，避免模型误读。
 
-## 8.7 工具注册策略
+## 8.7 现代 Agent Runtime 能力
+
+Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 runtime 能力：
+
+| 能力 | 解决的问题 | 学习阶段如何处理 |
+| --- | --- | --- |
+| Sessions / 会话状态 | 多轮上下文、短期记忆、任务连续性 | 第 8 章先做会话历史和摘要 |
+| Human-in-the-loop | 高风险工具、审批、纠错 | 第 9 章放入 Workflow 节点 |
+| Trace / Tracing | 解释每一步为什么发生 | 第 8 章记录 run / step / tool_call |
+| Background mode | 深度研究、长报告、复杂工具链路 | 第 9 章作为异步任务处理 |
+| Realtime agent | 语音、低延迟交互、多模态实时输入 | 不进入 12 周主线，可做扩展 |
+
+长任务不要卡在一个 HTTP 请求里等待模型慢慢跑完。更稳的做法是：
+
+1. API 创建任务并返回 `run_id`。
+2. 后台 worker 执行 Agent / Workflow。
+3. 前端通过 SSE / WebSocket / 轮询查看进度。
+4. 每一步写入 trace 和状态表。
+5. 失败后允许从最近 checkpoint 恢复或重新运行。
+
+## 8.8 工具注册策略
 
 本章建议只注册低风险工具：
 
@@ -182,7 +203,7 @@ async def run_course_agent(question: str) -> str:
 
 如果要支持这些工具，必须放到第 9 章 Workflow 的人工确认节点里。
 
-## 8.8 记忆设计
+## 8.9 记忆设计
 
 记忆分三类：
 
@@ -200,11 +221,11 @@ async def run_course_agent(question: str) -> str:
 {
   "conversation_id": "conv_001",
   "summary": "用户正在学习 RAG 和 Tool Calling，已完成基础模型调用。",
-  "updated_at": "2026-06-16T10:00:00Z"
+  "updated_at": "2026-07-09T10:00:00Z"
 }
 ```
 
-## 8.9 失败处理
+## 8.10 失败处理
 
 常见失败：
 
@@ -219,7 +240,7 @@ async def run_course_agent(question: str) -> str:
 
 失败结果要进入 trace，而不是只返回“系统繁忙”。
 
-## 8.10 测试场景
+## 8.11 测试场景
 
 至少准备 10 个 Agent 测试用例：
 
@@ -236,7 +257,7 @@ async def run_course_agent(question: str) -> str:
 | 高风险请求 | 删除文档 | 拒绝或转人工确认 |
 | 循环风险 | 一直继续查 | 达到停止条件 |
 
-## 8.11 MVP / 进阶 / 生产化验收
+## 8.12 MVP / 进阶 / 生产化验收
 
 ### MVP
 
@@ -259,8 +280,9 @@ async def run_course_agent(question: str) -> str:
 - 线上失败样本回流测试集。
 - 工具风险等级和人工确认策略可配置。
 - 成本和 token 超限自动停止。
+- 长任务走后台任务或 durable workflow，不阻塞单个请求。
 
-## 8.12 常见误区
+## 8.13 常见误区
 
 - 把 Agent 当万能自动化。
 - 不设最大轮数。
@@ -268,16 +290,18 @@ async def run_course_agent(question: str) -> str:
 - 不记录工具调用参数。
 - 让模型自己判断权限。
 - 把长期记忆当数据库。
+- 用同步 HTTP 请求承载深度研究、报告生成等长任务。
 
-## 8.13 本章学习资料
+## 8.14 本章学习资料
 
 - [OpenAI Agents SDK - Agents](https://openai.github.io/openai-agents-python/agents/)
 - [OpenAI Agents SDK - Tools](https://openai.github.io/openai-agents-python/tools/)
 - [OpenAI Agents SDK - Tracing](https://openai.github.io/openai-agents-python/tracing/)
+- [OpenAI Background Mode](https://developers.openai.com/api/docs/guides/background)
 - [ReAct Paper](https://arxiv.org/abs/2210.03629)
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 
-## 8.14 本章复盘模板
+## 8.15 本章复盘模板
 
 ```markdown
 # 第 8 章复盘
