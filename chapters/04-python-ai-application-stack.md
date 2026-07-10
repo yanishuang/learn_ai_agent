@@ -72,7 +72,8 @@ Pydantic AI。参考实现的核心合同只依赖 Pydantic，因此 Fake、Open
 Agents SDK 或其他 adapter 都能复用相同的业务边界。
 
 OpenAI SDK、OpenAI Agents SDK、Pydantic AI、LangGraph、LlamaIndex 等项目的版本、
-成熟度和能力对比统一维护在 `docs/ecosystem-maturity.md`；本章不复制会过期的功能表。
+成熟度和能力对比统一维护在[生态成熟度矩阵](../docs/ecosystem-maturity.md)；本章不复制
+会过期的功能表。
 
 ## 4.3 框架对比
 
@@ -307,7 +308,8 @@ async def explain_with_agent(concept: str) -> str:
 - 主要复杂度是文档摄取与检索连接器：RAG 框架。
 - 工具要被多个进程或产品复用：边界稳定后采用 MCP。
 
-具体产品的版本、成熟度、验证日期和来源只在 `docs/ecosystem-maturity.md` 更新。
+具体产品的版本、成熟度、验证日期和来源只在[生态成熟度矩阵](../docs/ecosystem-maturity.md)
+更新。
 本章的选择规则不随某一版本的功能清单变化。
 
 ## 4.10 常见工程误区
@@ -386,13 +388,16 @@ async def explain_with_agent(concept: str) -> str:
 
 ### 任务 3：框架选择记录
 
-先查阅 `docs/ecosystem-maturity.md` 的当前版本、成熟度、验证日期和来源，再只按本章
-选择规则记录决策，不在作业中复制一份新的生态功能表：
+先查阅[生态成熟度矩阵](../docs/ecosystem-maturity.md)的当前版本、成熟度、验证日期和
+来源；在记录中写出你实际参考的矩阵行和来源链接。再只按本章选择规则记录决策，不在
+作业中复制一份新的生态功能表：
 
 ```markdown
 # Python AI 应用框架选择记录
 
 ## 当前任务与约束
+
+## 参考的成熟度矩阵行与来源
 
 ## 必需能力：模型 / 工具 / 状态 / 恢复 / 互操作
 

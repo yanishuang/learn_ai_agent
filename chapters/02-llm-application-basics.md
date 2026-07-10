@@ -186,6 +186,29 @@ def load_live_settings() -> LiveSettings:
 
 ## 2.7 实践一：普通问答 API
 
+### 默认离线启动：先运行参考实现
+
+本章的默认可运行路径不是下面的 Live adapter 示例，而是课程仓库中的离线参考实现。
+它由 `create_app()` 组合 `FakeModelGateway`、本地工具、内存 session 和 trace，不读取
+API Key，也不发起模型网络请求。先进入 `reference-implementation/`，再运行与参考实现
+README 一致的命令：
+
+```bash
+uv sync --group dev --extra live
+uv run --group dev --extra live uvicorn agent_course.api.app:create_app --factory --reload
+```
+
+在另一终端确认离线应用已经启动：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+预期结果是 `{"status":"ok"}`。这个默认 API 故意不伪造认证身份；除 `/health` 外的
+端点需要宿主应用从认证结果注入 `RunContext`，否则会以 `503` 失败。它仍然已经完成
+`FakeModelGateway` 的离线组合；带真实身份的 API 请求在参考实现测试中通过
+`create_app(..., context_provider=...)` 注入。
+
 ### 目标
 
 实现一个接口：
@@ -226,7 +249,10 @@ class ChatResponse(BaseModel):
     answer: str
 ```
 
-### OpenAI Client
+### Live-only 示例：OpenAI Client
+
+本小节及后续的 `app/` 代码展示如何把同一 API 设计接到真实 Responses API。它们不是
+参考实现的默认启动模块，不能在未设置三重 Live 门禁时导入或启动。
 
 `app/ai/client.py`：
 
@@ -300,12 +326,13 @@ app = FastAPI(title="AI Agent Course")
 app.include_router(router)
 ```
 
-### 验收方式
+### 可选 Live 验收方式
 
-启动服务：
+只有完成自己的 `app/` 项目并显式设置 `AGENT_COURSE_LIVE_TESTS=1`、非空
+`OPENAI_API_KEY` 和非空 `OPENAI_MODEL` 后，才可以启动这个 Live-only 示例：
 
 ```bash
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 ```
 
 调用接口：
@@ -316,7 +343,8 @@ curl -X POST http://127.0.0.1:8000/api/ai/chat \
   -d '{"message":"请用三句话解释什么是 RAG"}'
 ```
 
-能得到中文回答，即完成本章第一个目标。
+能得到中文回答，即完成 Live 对比实验。日常学习、自动测试和首次启动仍使用上一节的
+`FakeModelGateway` 离线路径。
 
 ## 2.8 实践二：结构化输出
 
