@@ -546,6 +546,165 @@ async def test_responses_gateway_rejects_invalid_schema_container_shapes(
 
 
 @pytest.mark.parametrize(
+    ("property_schema", "error_path"),
+    [
+        ({"type": "string", "format": "uri"}, r"\.format"),
+        ({"type": "boolean", "format": "date"}, r"\.format"),
+        ({"type": "boolean", "pattern": "true|false"}, r"\.pattern"),
+        ({"type": "string", "minimum": 0}, r"\.minimum"),
+        (
+            {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxLength": 3,
+            },
+            r"\.maxLength",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_invalid_formats_and_type_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+    property_schema: dict[str, object],
+    error_path: str,
+) -> None:
+    await assert_schema_rejected_before_request(
+        monkeypatch,
+        strict_tool_schema(property_schema),
+        rf"\$\.properties\.value{error_path}",
+    )
+
+
+@pytest.mark.parametrize(
+    "format_name",
+    ["date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid"],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_accepts_documented_string_formats(
+    monkeypatch: pytest.MonkeyPatch,
+    format_name: str,
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+    tool = ToolDefinition(
+        name="query_order_status",
+        description="Query an order",
+        input_schema=strict_tool_schema({"type": "string", "format": format_name}),
+    )
+
+    await gateway.next_step(
+        messages=[Message(role="user", content="Order O1001")], tools=[tool]
+    )
+
+    assert len(client.responses.create_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "property_schema",
+    [
+        {"type": "string", "minLength": 1, "maxLength": 80, "pattern": ".+"},
+        {
+            "type": "number",
+            "multipleOf": 0.5,
+            "minimum": 0,
+            "maximum": 10,
+            "exclusiveMinimum": -1,
+            "exclusiveMaximum": 11,
+        },
+        {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string"}},
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_accepts_documented_type_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+    property_schema: dict[str, object],
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+    tool = ToolDefinition(
+        name="query_order_status",
+        description="Query an order",
+        input_schema=strict_tool_schema(property_schema),
+    )
+
+    await gateway.next_step(
+        messages=[Message(role="user", content="Order O1001")], tools=[tool]
+    )
+
+    assert len(client.responses.create_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["#/$defs/Missing", "#/definitions/Address", "https://example.com/Address"],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_unresolved_or_unsupported_refs(
+    monkeypatch: pytest.MonkeyPatch,
+    reference: str,
+) -> None:
+    await assert_schema_rejected_before_request(
+        monkeypatch,
+        strict_tool_schema({"$ref": reference}),
+        r"\$\.properties\.value\.\$ref",
+    )
+
+
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_empty_any_of_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await assert_schema_rejected_before_request(
+        monkeypatch,
+        strict_tool_schema({"anyOf": []}),
+        r"\$\.properties\.value\.anyOf",
+    )
+
+
+@pytest.mark.asyncio
+async def test_responses_gateway_accepts_recursive_local_defs_and_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+    tool = ToolDefinition(
+        name="query_order_status",
+        description="Query an order",
+        input_schema={
+            "type": "object",
+            "properties": {"node": {"$ref": "#/$defs/Node"}},
+            "required": ["node"],
+            "additionalProperties": False,
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "next": {
+                            "anyOf": [
+                                {"type": "null"},
+                                {"$ref": "#/$defs/Node"},
+                            ]
+                        },
+                    },
+                    "required": ["value", "next"],
+                    "additionalProperties": False,
+                }
+            },
+        },
+    )
+
+    await gateway.next_step(
+        messages=[Message(role="user", content="Order O1001")], tools=[tool]
+    )
+
+    assert len(client.responses.create_calls) == 1
+
+
+@pytest.mark.parametrize(
     "schema",
     [
         {

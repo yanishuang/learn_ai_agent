@@ -176,18 +176,18 @@ _NULLABLE_SCALAR_TYPES = frozenset(
     {"string", "number", "boolean", "integer", "null"}
 )
 _OBJECT_KEYWORDS = frozenset({"properties", "required", "additionalProperties"})
-_STRING_KEYWORDS = frozenset({"title", "description", "pattern", "format"})
-_NUMBER_KEYWORDS = frozenset(
-    {
-        "multipleOf",
-        "minimum",
-        "maximum",
-        "exclusiveMinimum",
-        "exclusiveMaximum",
-    }
+_METADATA_KEYWORDS = ("title", "description")
+_STRING_CONSTRAINTS = ("minLength", "maxLength", "pattern", "format")
+_NUMBER_CONSTRAINTS = (
+    "multipleOf",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
 )
-_NON_NEGATIVE_INTEGER_KEYWORDS = frozenset(
-    {"minLength", "maxLength", "minItems", "maxItems"}
+_ARRAY_CONSTRAINTS = ("minItems", "maxItems")
+_DOCUMENTED_FORMATS = frozenset(
+    {"date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid"}
 )
 
 
@@ -195,15 +195,18 @@ def _validate_strict_schema(schema: dict[str, object], path: str = "$") -> None:
     """Validate the course's documented Structured Outputs schema subset."""
 
     _validate_schema_node(schema, path, root=True)
+    _validate_local_references(schema, path)
 
 
 def _validate_schema_node(node: object, path: str, *, root: bool = False) -> None:
     if not isinstance(node, dict):
         raise ValueError(f"strict tool schema {path} must be an object")
 
-    for keyword in node:
-        if keyword not in _SUPPORTED_SCHEMA_KEYWORDS:
-            raise ValueError(f"strict tool schema {path}.{keyword} is unsupported")
+    unsupported_keywords = sorted(set(node) - _SUPPORTED_SCHEMA_KEYWORDS)
+    if unsupported_keywords:
+        raise ValueError(
+            f"strict tool schema {path}.{unsupported_keywords[0]} is unsupported"
+        )
 
     if root:
         if "anyOf" in node:
@@ -211,24 +214,35 @@ def _validate_schema_node(node: object, path: str, *, root: bool = False) -> Non
         if node.get("type") != "object":
             raise ValueError(f"strict tool schema {path}.type must be 'object'")
 
-    _validate_schema_values(node, path)
-
-    node_type = node.get("type")
-    if _OBJECT_KEYWORDS & node.keys() and node_type != "object":
-        raise ValueError(f"strict tool schema {path}.type must be 'object'")
-    if node_type == "object":
-        _validate_strict_object(node, path)
-    elif node_type == "array" and "items" not in node:
-        raise ValueError(f"strict tool schema {path}.items must be an object")
+    schema_types = _validate_schema_values(node, path)
+    if "$ref" in node:
+        _validate_reference_node(node, path)
+    elif "anyOf" in node:
+        _validate_any_of_node(node, path)
+    else:
+        if schema_types is None:
+            raise ValueError(f"strict tool schema {path}.type is required")
+        _validate_type_specific_constraints(node, schema_types, path)
+        if _OBJECT_KEYWORDS & node.keys() and schema_types != {"object"}:
+            raise ValueError(f"strict tool schema {path}.type must be 'object'")
+        if schema_types == {"object"}:
+            _validate_strict_object(node, path)
+        if "items" in node and schema_types != {"array"}:
+            raise ValueError(f"strict tool schema {path}.items requires type 'array'")
+        if schema_types == {"array"} and "items" not in node:
+            raise ValueError(f"strict tool schema {path}.items must be an object")
 
     _validate_schema_children(node, path)
 
 
-def _validate_schema_values(schema: dict[str, object], path: str) -> None:
+def _validate_schema_values(
+    schema: dict[str, object], path: str
+) -> frozenset[str] | None:
+    schema_types = None
     if "type" in schema:
-        _validate_type(schema["type"], path)
+        schema_types = _validate_type(schema["type"], path)
 
-    for keyword in _STRING_KEYWORDS:
+    for keyword in (*_METADATA_KEYWORDS, "pattern", "format"):
         if keyword in schema and not isinstance(schema[keyword], str):
             raise ValueError(f"strict tool schema {path}.{keyword} must be a string")
 
@@ -237,11 +251,11 @@ def _validate_schema_values(schema: dict[str, object], path: str) -> None:
     if "$ref" in schema and not isinstance(schema["$ref"], str):
         raise ValueError(f"strict tool schema {path}.$ref must be a string")
 
-    for keyword in _NUMBER_KEYWORDS:
+    for keyword in _NUMBER_CONSTRAINTS:
         if keyword in schema and not _is_number(schema[keyword]):
             raise ValueError(f"strict tool schema {path}.{keyword} must be a number")
 
-    for keyword in _NON_NEGATIVE_INTEGER_KEYWORDS:
+    for keyword in (*_STRING_CONSTRAINTS[:2], *_ARRAY_CONSTRAINTS):
         if keyword in schema and (
             not isinstance(schema[keyword], int)
             or isinstance(schema[keyword], bool)
@@ -251,21 +265,76 @@ def _validate_schema_values(schema: dict[str, object], path: str) -> None:
                 f"strict tool schema {path}.{keyword} must be a non-negative integer"
             )
 
+    return schema_types
 
-def _validate_type(value: object, path: str) -> None:
+
+def _validate_type(value: object, path: str) -> frozenset[str]:
     if isinstance(value, str) and value in _SUPPORTED_TYPES:
-        return
+        return frozenset({value})
     if (
         isinstance(value, list)
         and len(value) >= 2
         and "null" in value
         and all(isinstance(item, str) and item in _NULLABLE_SCALAR_TYPES for item in value)
     ):
-        return
+        return frozenset(cast(list[str], value))
     raise ValueError(
         f"strict tool schema {path}.type must be a supported type or nullable scalar "
         "type array"
     )
+
+
+def _validate_reference_node(schema: dict[str, object], path: str) -> None:
+    _validate_exclusive_node_keywords(
+        schema, path, "$ref", frozenset({"$ref", *_METADATA_KEYWORDS})
+    )
+
+
+def _validate_any_of_node(schema: dict[str, object], path: str) -> None:
+    _validate_exclusive_node_keywords(
+        schema, path, "anyOf", frozenset({"anyOf", *_METADATA_KEYWORDS})
+    )
+
+
+def _validate_exclusive_node_keywords(
+    schema: dict[str, object], path: str, node_kind: str, allowed: frozenset[str]
+) -> None:
+    incompatible_keywords = sorted(set(schema) - allowed)
+    if incompatible_keywords:
+        raise ValueError(
+            f"strict tool schema {path}.{incompatible_keywords[0]} cannot be combined "
+            f"with {node_kind}"
+        )
+
+
+def _validate_type_specific_constraints(
+    schema: dict[str, object], schema_types: frozenset[str], path: str
+) -> None:
+    _validate_constraint_types(schema, path, schema_types, _STRING_CONSTRAINTS, {"string"})
+    _validate_constraint_types(
+        schema, path, schema_types, _NUMBER_CONSTRAINTS, {"number", "integer"}
+    )
+    _validate_constraint_types(schema, path, schema_types, _ARRAY_CONSTRAINTS, {"array"})
+
+    if "format" in schema and schema["format"] not in _DOCUMENTED_FORMATS:
+        raise ValueError(
+            f"strict tool schema {path}.format must be one of the documented formats"
+        )
+
+
+def _validate_constraint_types(
+    schema: dict[str, object],
+    path: str,
+    schema_types: frozenset[str],
+    constraints: tuple[str, ...],
+    allowed_types: set[str],
+) -> None:
+    for keyword in constraints:
+        if keyword in schema and not schema_types & allowed_types:
+            type_names = "/".join(sorted(allowed_types))
+            raise ValueError(
+                f"strict tool schema {path}.{keyword} requires type {type_names!r}"
+            )
 
 
 def _validate_strict_object(schema: dict[str, object], path: str) -> None:
@@ -283,7 +352,7 @@ def _validate_strict_object(schema: dict[str, object], path: str) -> None:
     ):
         raise ValueError(f"strict tool schema {path}.required must be an array")
 
-    missing = [name for name in properties if name not in required]
+    missing = sorted(name for name in properties if name not in required)
     if missing:
         raise ValueError(
             f"strict tool schema {path}.required must include every property; "
@@ -302,18 +371,86 @@ def _validate_schema_children(schema: dict[str, object], path: str) -> None:
         _validate_schema_map(schema["$defs"], f"{path}.$defs")
 
 
+def _validate_local_references(schema: dict[str, object], path: str) -> None:
+    definitions = schema.get("$defs", {})
+    if not isinstance(definitions, dict):
+        return
+    _validate_schema_references(schema, path, frozenset(definitions))
+
+
+def _validate_schema_references(
+    schema: dict[str, object], path: str, definition_names: frozenset[str]
+) -> None:
+    if "$ref" in schema:
+        reference = cast(str, schema["$ref"])
+        _validate_local_reference(reference, path, definition_names)
+    if "properties" in schema:
+        _validate_schema_map_references(
+            cast(dict[str, object], schema["properties"]),
+            f"{path}.properties",
+            definition_names,
+        )
+    if "items" in schema:
+        _validate_schema_references(
+            cast(dict[str, object], schema["items"]),
+            f"{path}.items",
+            definition_names,
+        )
+    if "anyOf" in schema:
+        for index, child in enumerate(cast(list[dict[str, object]], schema["anyOf"])):
+            _validate_schema_references(
+                child, f"{path}.anyOf[{index}]", definition_names
+            )
+    if "$defs" in schema:
+        _validate_schema_map_references(
+            cast(dict[str, object], schema["$defs"]),
+            f"{path}.$defs",
+            definition_names,
+        )
+
+
+def _validate_local_reference(
+    reference: str, path: str, definition_names: frozenset[str]
+) -> None:
+    prefix = "#/$defs/"
+    if not reference.startswith(prefix):
+        raise ValueError(
+            f"strict tool schema {path}.$ref must use a local #/$defs/<name> reference"
+        )
+
+    definition_name = reference.removeprefix(prefix)
+    if not definition_name or "/" in definition_name or definition_name not in definition_names:
+        raise ValueError(
+            f"strict tool schema {path}.$ref references an unknown local definition "
+            f"{definition_name!r}"
+        )
+
+
+def _validate_schema_map_references(
+    children: dict[str, object], path: str, definition_names: frozenset[str]
+) -> None:
+    for name in sorted(children):
+        _validate_schema_references(
+            cast(dict[str, object], children[name]),
+            f"{path}.{name}",
+            definition_names,
+        )
+
+
 def _validate_schema_map(children: object, path: str) -> None:
     if not isinstance(children, dict):
         raise ValueError(f"strict tool schema {path} must be an object")
-    for name, child in children.items():
-        if not isinstance(name, str):
-            raise ValueError(f"strict tool schema {path} must use string names")
-        _validate_schema_node(child, f"{path}.{name}")
+    if not all(isinstance(name, str) for name in children):
+        raise ValueError(f"strict tool schema {path} must use string names")
+    for name in sorted(children):
+        _validate_schema_node(children[name], f"{path}.{name}")
 
 
 def _validate_schema_list(children: object, path: str) -> None:
     if not isinstance(children, list):
         raise ValueError(f"strict tool schema {path} must be an array")
+    if not children:
+        raise ValueError(f"strict tool schema {path} must contain at least one schema")
     for index, child in enumerate(children):
         _validate_schema_node(child, f"{path}[{index}]")
 
