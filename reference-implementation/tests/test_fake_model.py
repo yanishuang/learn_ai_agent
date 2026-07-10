@@ -47,6 +47,27 @@ async def test_fake_model_emits_deterministic_order_tool_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_normal_order_fixture_finishes_after_tool_result() -> None:
+    model = FakeModelGateway()
+
+    step = await model.next_step(
+        messages=[
+            Message(role="user", content=ORDER_QUERY_FIXTURE),
+            Message(
+                role="tool",
+                content='{"status":"shipped"}',
+                tool_call_id="fake-query-order-status-O1001",
+            ),
+        ],
+        tools=[ORDER_TOOL],
+    )
+
+    assert step.stop_reason is StopReason.COMPLETED
+    assert step.tool_calls == ()
+    assert step.content == "订单 O1001 当前状态为 shipped。"
+
+
+@pytest.mark.asyncio
 async def test_fake_model_returns_deterministic_plain_answer() -> None:
     model = FakeModelGateway()
 
@@ -90,7 +111,14 @@ async def test_fake_model_injects_invalid_output_explicitly() -> None:
 @pytest.mark.asyncio
 async def test_fake_model_injects_repeated_call_without_state_or_randomness() -> None:
     model = FakeModelGateway()
-    messages = [Message(role="user", content=REPEATED_CALL_FIXTURE)]
+    messages = [
+        Message(role="user", content=REPEATED_CALL_FIXTURE),
+        Message(
+            role="tool",
+            content='{"status":"shipped"}',
+            tool_call_id="fake-query-order-status-O1001",
+        ),
+    ]
 
     first = await model.next_step(messages=messages, tools=[ORDER_TOOL])
     second = await model.next_step(messages=messages, tools=[ORDER_TOOL])

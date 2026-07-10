@@ -18,6 +18,7 @@ REPEATED_CALL_FIXTURE = "[fixture:repeated-order-call]"
 _ORDER_TOOL = "query_order_status"
 _ORDER_ID = "O1001"
 _PLAIN_ANSWER = "Agent 是在边界内使用模型、工具和状态完成任务的应用程序。"
+_ORDER_ANSWER = "订单 O1001 当前状态为 shipped。"
 
 
 class ModelTimeoutError(TimeoutError):
@@ -48,6 +49,8 @@ class FakeModelGateway:
             raise ModelTimeoutError("deterministic timeout fixture")
         if prompt == INVALID_OUTPUT_FIXTURE:
             raise InvalidModelOutputError("deterministic invalid output fixture")
+        if prompt == ORDER_QUERY_FIXTURE and self._has_order_tool_result(messages):
+            return ModelStep(content=_ORDER_ANSWER)
         if prompt in {ORDER_QUERY_FIXTURE, REPEATED_CALL_FIXTURE}:
             self._require_tool(_ORDER_TOOL, tools)
             return ModelStep(
@@ -74,3 +77,11 @@ class FakeModelGateway:
     def _require_tool(name: str, tools: list[ToolDefinition]) -> None:
         if name not in {tool.name for tool in tools}:
             raise ToolUnavailableError(f"required tool is unavailable: {name}")
+
+    @staticmethod
+    def _has_order_tool_result(messages: list[Message]) -> bool:
+        return any(
+            message.role == "tool"
+            and message.tool_call_id == "fake-query-order-status-O1001"
+            for message in messages
+        )
