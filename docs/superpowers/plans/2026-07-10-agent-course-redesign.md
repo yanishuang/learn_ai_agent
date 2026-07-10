@@ -22,6 +22,16 @@
 - Existing illustration assets are preserved unless a replacement materially improves teaching clarity.
 - Existing unrelated user changes must not be reverted.
 
+## Execution Order
+
+Execute task briefs in dependency order rather than numeric presentation order:
+
+```text
+1 -> 2 -> 8 -> 9 -> 10 -> 4 -> 5 -> 6 -> 7 -> 11 -> 3 -> 12
+```
+
+This ensures the reference implementation exists before chapter code is finalized, labs exist before the README and course map link to them, and the final portal describes verified commands rather than planned commands.
+
 ---
 
 ### Task 1: Add Course Validation Before Structural Changes
