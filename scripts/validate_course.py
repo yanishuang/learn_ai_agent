@@ -172,7 +172,7 @@ def _validate_course_manifest(root: Path) -> list[str]:
 def _is_within_root(path: Path, resolved_root: Path) -> bool:
     try:
         path.resolve().relative_to(resolved_root)
-    except ValueError:
+    except (RuntimeError, ValueError):
         return False
     return True
 
@@ -182,7 +182,7 @@ def _validate_ecosystem_maturity(root: Path) -> list[str]:
     if not matrix_file.is_file():
         return []
 
-    lines = matrix_file.read_text(encoding="utf-8").splitlines()
+    lines = _lines_outside_fenced_code_blocks(matrix_file)
     header_index = next(
         (
             index

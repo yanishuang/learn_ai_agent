@@ -185,6 +185,25 @@ def test_manifest_rejects_chapter_paths_that_escape_through_symlinks(
     ]
 
 
+def test_manifest_reports_symlink_loops_as_paths_that_escape_repository_root(
+    tmp_path: Path,
+) -> None:
+    chapters = tmp_path / "chapters"
+    chapters.mkdir()
+    (chapters / "loop.txt").symlink_to("loop.txt")
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "course-manifest.json").write_text(
+        '[{"path": "chapters/loop.txt", "title": "Chapter"}]\n',
+        encoding="utf-8",
+    )
+
+    assert validate_repository(tmp_path) == [
+        "docs/course-manifest.json: entry 1 path escapes repository root"
+    ]
+
+
 def test_fence_closes_only_with_whitespace_after_matching_backticks_or_tildes(
     tmp_path: Path,
 ) -> None:
@@ -276,3 +295,38 @@ def test_ecosystem_matrix_requires_a_markdown_pipe_table(tmp_path: Path) -> None
     assert validate_repository(tmp_path) == [
         "docs/ecosystem-maturity.md: missing maturity table"
     ]
+
+
+def test_ecosystem_matrix_ignores_tables_inside_fenced_code_blocks(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "ecosystem-maturity.md").write_text(
+        "```markdown\n"
+        "| Technology | Maturity |\n"
+        "| --- | --- |\n"
+        "| Example SDK | Stable |\n"
+        "```\n",
+        encoding="utf-8",
+    )
+
+    assert validate_repository(tmp_path) == [
+        "docs/ecosystem-maturity.md: missing maturity table"
+    ]
+
+
+def test_ecosystem_matrix_uses_real_table_after_a_fenced_decoy(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "ecosystem-maturity.md").write_text(
+        "```markdown\n"
+        "| Technology | Maturity |\n"
+        "| --- | --- |\n"
+        "| Example SDK | Unknown |\n"
+        "```\n\n"
+        "| Technology | Maturity |\n"
+        "| --- | --- |\n"
+        "| Example SDK | Stable |\n",
+        encoding="utf-8",
+    )
+
+    assert validate_repository(tmp_path) == []
