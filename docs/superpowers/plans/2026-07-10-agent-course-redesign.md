@@ -549,7 +549,7 @@ Use frozen Pydantic models for messages, tool calls, model steps, tool results, 
 
 - [ ] **Step 4: Define and lock dependency groups**
 
-Core dependencies are `fastapi`, `mcp`, `pydantic`, `pydantic-settings`, and `uvicorn`. The `live` extra contains `openai` and `openai-agents`. The `dev` extra contains `httpx`, `pytest`, `pytest-asyncio`, and `ruff`. `uv.lock` pins the resolved versions used by the course.
+Core dependencies are `fastapi`, `mcp>=1.27,<2`, `pydantic`, `pydantic-settings`, and `uvicorn`. The MCP upper bound keeps the executable mainline on the current stable v1 SDK while v2 is pre-release. The `live` optional extra contains `openai` and `openai-agents`. The PEP 735 `dev` dependency group contains `httpx`, `pytest`, `pytest-asyncio`, and `ruff`. `uv.lock` pins the resolved versions used by the course.
 
 - [ ] **Step 5: Implement both live adapter gates**
 
@@ -570,8 +570,10 @@ It must use native Responses structured outputs where a structured result is req
 Install `uv` in a project-local or user-local tool location if absent, then run:
 
 ```bash
-uv sync --extra dev --extra live
-uv run pytest tests/test_fake_model.py -q
+uv python install 3.12
+uv sync --group dev --extra live
+uv lock --check
+uv run --group dev --extra live pytest tests/test_fake_model.py -q
 ```
 
 Expected: pass without a live API call.
