@@ -565,7 +565,7 @@ OPENAI_MODEL must be non-empty
 
 It must use native Responses structured outputs where a structured result is requested.
 
-For tool loops, it must return the public Responses response ID as a `ModelContinuation`, accept that continuation on the next step, and send it as `previous_response_id`. The gateway must remain stateless; the application owns and persists continuation state. Strict tool schemas must be validated locally before sending `strict: true`, with a clear schema-path diagnostic.
+For tool loops, it must return the public Responses response ID as a `ModelContinuation`, accept that continuation on the next step, and send it as `previous_response_id`. The gateway must remain stateless; the application owns and persists continuation state. Strict tool schemas must be validated locally before sending `strict: true`, with a clear schema-path diagnostic. The validator intentionally accepts only the documented course subset (`object`/`array`/scalar nodes, `anyOf`, `$defs`/`$ref`, and documented type constraints) and rejects unsupported or unknown schema keywords before the client call.
 
 `OpenAIAgentsRunner.from_environment()` uses the same gate and provides the SDK-managed path used by Chapter 6. Default tests assert that both live adapters refuse to initialize when the gate is absent; they do not call the network.
 
