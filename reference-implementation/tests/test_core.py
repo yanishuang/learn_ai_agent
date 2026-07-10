@@ -1,3 +1,4 @@
+from inspect import Parameter, signature
 from typing import get_type_hints
 
 import pytest
@@ -5,6 +6,7 @@ from pydantic import ValidationError
 
 from agent_course.core import (
     Message,
+    ModelContinuation,
     ModelGateway,
     ModelStep,
     PermissionDeniedError,
@@ -20,6 +22,7 @@ from agent_course.core import (
     "model",
     [
         Message(role="user", content="hello"),
+        ModelContinuation(provider="provider", token="token"),
         ToolDefinition(name="lookup", description="Lookup", input_schema={}),
         ToolCall(id="call-1", name="lookup", arguments={}),
         ModelStep(content="hello"),
@@ -101,7 +104,29 @@ def test_run_limits_require_positive_values(field: str, value: int) -> None:
 
 def test_model_gateway_signature_is_async_and_stable() -> None:
     annotations = get_type_hints(ModelGateway.next_step)
+    parameters = signature(ModelGateway.next_step).parameters
 
     assert annotations["messages"] == list[Message]
     assert annotations["tools"] == list[ToolDefinition]
+    assert annotations["continuation"] == ModelContinuation | None
     assert annotations["return"] is ModelStep
+    assert parameters["continuation"].kind is Parameter.KEYWORD_ONLY
+    assert parameters["continuation"].default is None
+
+
+@pytest.mark.parametrize("field", ["provider", "token"])
+@pytest.mark.parametrize("value", ["", "   "])
+def test_model_continuation_rejects_blank_values(field: str, value: str) -> None:
+    values = {"provider": "provider", "token": "token"}
+    values[field] = value
+
+    with pytest.raises(ValidationError, match="nonblank"):
+        ModelContinuation(**values)
+
+
+def test_model_step_carries_caller_owned_continuation() -> None:
+    continuation = ModelContinuation(provider="provider", token="response-1")
+
+    step = ModelStep(content="continue", continuation=continuation)
+
+    assert step.continuation == continuation

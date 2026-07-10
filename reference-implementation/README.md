@@ -62,6 +62,21 @@ append structured tool results, enforce limits, and request the next step. Its
 `parse_structured()` path calls `AsyncOpenAI.responses.parse()` with a Pydantic
 `text_format` and rejects a response without `output_parsed`.
 
+Every successful `next_step()` returns a caller-owned `ModelContinuation` built
+from the public Responses response ID. Persist that value with your run state
+and pass it back through the keyword-only `continuation` argument on the next
+call. When a continuation is present, `messages` is a delta: include only items
+created since the prior response, normally one or more `tool` messages that
+become `function_call_output` items. Do not resend the earlier transcript along
+with `previous_response_id`. The gateway stores no response IDs or mutable run
+state.
+
+Tools are sent with `strict: true`. Before any client request, the gateway
+checks that every object schema disables additional properties, requires every
+declared property, and applies the same rules recursively through nested object
+properties and array items. Invalid schemas are rejected unchanged with a
+JSON-path diagnostic.
+
 `OpenAIAgentsRunner` uses the OpenAI Agents SDK. The SDK owns the run lifecycle
 through `Agent` and `Runner.run`; the reference wrapper selects the configured
 model and disables sensitive trace data by default.

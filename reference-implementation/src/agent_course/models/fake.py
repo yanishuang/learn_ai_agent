@@ -2,6 +2,7 @@
 
 from agent_course.core import (
     Message,
+    ModelContinuation,
     ModelStep,
     StopReason,
     ToolCall,
@@ -9,6 +10,7 @@ from agent_course.core import (
 )
 
 PLAIN_ANSWER_FIXTURE = "什么是 Agent？"
+ORDER_QUERY_FIXTURE = "查询订单 O1001"
 TIMEOUT_FIXTURE = "[fixture:timeout]"
 INVALID_OUTPUT_FIXTURE = "[fixture:invalid-output]"
 REPEATED_CALL_FIXTURE = "[fixture:repeated-order-call]"
@@ -37,6 +39,8 @@ class FakeModelGateway:
         self,
         messages: list[Message],
         tools: list[ToolDefinition],
+        *,
+        continuation: ModelContinuation | None = None,
     ) -> ModelStep:
         prompt = self._latest_user_message(messages)
 
@@ -44,7 +48,7 @@ class FakeModelGateway:
             raise ModelTimeoutError("deterministic timeout fixture")
         if prompt == INVALID_OUTPUT_FIXTURE:
             raise InvalidModelOutputError("deterministic invalid output fixture")
-        if prompt == REPEATED_CALL_FIXTURE or _ORDER_ID in prompt:
+        if prompt in {ORDER_QUERY_FIXTURE, REPEATED_CALL_FIXTURE}:
             self._require_tool(_ORDER_TOOL, tools)
             return ModelStep(
                 tool_calls=(

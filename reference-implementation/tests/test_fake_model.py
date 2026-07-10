@@ -3,6 +3,7 @@ import pytest
 from agent_course.core import Message, StopReason, ToolDefinition
 from agent_course.models.fake import (
     INVALID_OUTPUT_FIXTURE,
+    ORDER_QUERY_FIXTURE,
     PLAIN_ANSWER_FIXTURE,
     REPEATED_CALL_FIXTURE,
     TIMEOUT_FIXTURE,
@@ -30,11 +31,11 @@ async def test_fake_model_emits_deterministic_order_tool_call() -> None:
     model = FakeModelGateway()
 
     first = await model.next_step(
-        messages=[Message(role="user", content="查询订单 O1001")],
+        messages=[Message(role="user", content=ORDER_QUERY_FIXTURE)],
         tools=[ORDER_TOOL],
     )
     second = await model.next_step(
-        messages=[Message(role="user", content="查询订单 O1001")],
+        messages=[Message(role="user", content=ORDER_QUERY_FIXTURE)],
         tools=[ORDER_TOOL],
     )
 
@@ -104,6 +105,40 @@ async def test_fake_model_refuses_to_emit_an_unavailable_tool() -> None:
 
     with pytest.raises(ToolUnavailableError, match="query_order_status"):
         await model.next_step(
-            messages=[Message(role="user", content="查询订单 O1001")],
+            messages=[Message(role="user", content=ORDER_QUERY_FIXTURE)],
             tools=[],
         )
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "不要查询订单 O1001",
+        "The release note mentions O1001 but asks for no order lookup.",
+        f"{ORDER_QUERY_FIXTURE}，但不要执行",
+    ],
+)
+@pytest.mark.asyncio
+async def test_fake_model_does_not_substring_match_order_ids(prompt: str) -> None:
+    step = await FakeModelGateway().next_step(
+        messages=[Message(role="user", content=prompt)],
+        tools=[ORDER_TOOL],
+    )
+
+    assert step.stop_reason is StopReason.COMPLETED
+    assert step.tool_calls == ()
+
+
+@pytest.mark.asyncio
+async def test_fake_model_accepts_explicit_continuation_keyword() -> None:
+    from agent_course.core import ModelContinuation
+
+    continuation = ModelContinuation(provider="fixture", token="turn-1")
+
+    step = await FakeModelGateway().next_step(
+        messages=[Message(role="user", content=PLAIN_ANSWER_FIXTURE)],
+        tools=[],
+        continuation=continuation,
+    )
+
+    assert step.stop_reason is StopReason.COMPLETED

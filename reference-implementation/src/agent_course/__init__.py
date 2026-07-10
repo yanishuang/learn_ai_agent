@@ -2,6 +2,7 @@
 
 from agent_course.core import (
     Message,
+    ModelContinuation,
     ModelGateway,
     ModelStep,
     ModelUsage,
@@ -16,6 +17,7 @@ from agent_course.core import (
 
 __all__ = [
     "Message",
+    "ModelContinuation",
     "ModelGateway",
     "ModelStep",
     "ModelUsage",

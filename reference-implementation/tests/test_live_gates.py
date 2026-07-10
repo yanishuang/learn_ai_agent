@@ -4,7 +4,12 @@ import pytest
 from pydantic import BaseModel
 
 from agent_course.agents.openai_agents import OpenAIAgentsRunner
-from agent_course.core import Message, StopReason, ToolDefinition
+from agent_course.core import (
+    Message,
+    ModelContinuation,
+    StopReason,
+    ToolDefinition,
+)
 from agent_course.models.base import LiveConfigurationError
 from agent_course.models.openai_responses import OpenAIResponsesGateway
 
@@ -13,6 +18,25 @@ LIVE_ENVIRONMENT = {
     "AGENT_COURSE_LIVE_TESTS": "1",
     "OPENAI_API_KEY": "test-key",
     "OPENAI_MODEL": "test-model",
+}
+
+ORDER_TOOL = ToolDefinition(
+    name="query_order_status",
+    description="Query an order",
+    input_schema={
+        "type": "object",
+        "properties": {"order_id": {"type": "string"}},
+        "required": ["order_id"],
+        "additionalProperties": False,
+    },
+)
+
+ORDER_TOOL_INPUT = {
+    "type": "function",
+    "name": "query_order_status",
+    "description": "Query an order",
+    "parameters": ORDER_TOOL.input_schema,
+    "strict": True,
 }
 
 
@@ -24,6 +48,7 @@ class NoNetworkResponses:
     async def create(self, **kwargs: object) -> SimpleNamespace:
         self.create_calls.append(kwargs)
         return SimpleNamespace(
+            id="response-1",
             output=[
                 SimpleNamespace(
                     type="function_call",
@@ -138,36 +163,225 @@ async def test_responses_gateway_converts_low_level_tool_calls(
     set_live_environment(monkeypatch)
     client = NoNetworkClient()
     gateway = OpenAIResponsesGateway.from_environment(client=client)
-    tool = ToolDefinition(
-        name="query_order_status",
-        description="Query an order",
-        input_schema={"type": "object"},
-    )
 
     step = await gateway.next_step(
         messages=[Message(role="user", content="Order O1001")],
-        tools=[tool],
+        tools=[ORDER_TOOL],
     )
 
     assert step.stop_reason is StopReason.TOOL_CALLS
     assert step.tool_calls[0].name == "query_order_status"
     assert step.tool_calls[0].arguments == {"order_id": "O1001"}
+    assert step.continuation == ModelContinuation(
+        provider="openai_responses",
+        token="response-1",
+    )
     assert step.usage.total_tokens == 18
     assert client.responses.create_calls == [
         {
             "model": "test-model",
             "input": [{"role": "user", "content": "Order O1001"}],
-            "tools": [
-                {
-                    "type": "function",
-                    "name": "query_order_status",
-                    "description": "Query an order",
-                    "parameters": {"type": "object"},
-                    "strict": True,
-                }
-            ],
+            "tools": [ORDER_TOOL_INPUT],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_responses_gateway_runs_injected_two_turn_tool_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_live_environment(monkeypatch)
+
+    class TwoTurnResponses:
+        def __init__(self) -> None:
+            self.create_calls: list[dict[str, object]] = []
+            self.responses = iter(
+                [
+                    SimpleNamespace(
+                        id="response-tool-call",
+                        output=[
+                            SimpleNamespace(
+                                type="function_call",
+                                call_id="call-order-1",
+                                name="query_order_status",
+                                arguments='{"order_id":"O1001"}',
+                            )
+                        ],
+                        output_text="",
+                        usage=None,
+                    ),
+                    SimpleNamespace(
+                        id="response-complete",
+                        output=[],
+                        output_text="Order O1001 is shipped.",
+                        usage=None,
+                    ),
+                ]
+            )
+
+        async def create(self, **kwargs: object) -> SimpleNamespace:
+            self.create_calls.append(kwargs)
+            return next(self.responses)
+
+    responses = TwoTurnResponses()
+    client = SimpleNamespace(responses=responses)
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+
+    first = await gateway.next_step(
+        messages=[Message(role="user", content="Order O1001")],
+        tools=[ORDER_TOOL],
+    )
+
+    def query_order_status(order_id: object) -> str:
+        assert order_id == "O1001"
+        return '{"order_id":"O1001","status":"shipped"}'
+
+    tool_output = Message(
+        role="tool",
+        tool_call_id=first.tool_calls[0].id,
+        content=query_order_status(**first.tool_calls[0].arguments),
+    )
+    second = await gateway.next_step(
+        messages=[tool_output],
+        tools=[ORDER_TOOL],
+        continuation=first.continuation,
+    )
+
+    assert second.content == "Order O1001 is shipped."
+    assert second.stop_reason is StopReason.COMPLETED
+    assert second.continuation == ModelContinuation(
+        provider="openai_responses",
+        token="response-complete",
+    )
+    assert responses.create_calls == [
+        {
+            "model": "test-model",
+            "input": [{"role": "user", "content": "Order O1001"}],
+            "tools": [ORDER_TOOL_INPUT],
+        },
+        {
+            "model": "test-model",
+            "input": [
+                {
+                    "type": "function_call_output",
+                    "call_id": "call-order-1",
+                    "output": '{"order_id":"O1001","status":"shipped"}',
+                }
+            ],
+            "tools": [ORDER_TOOL_INPUT],
+            "previous_response_id": "response-tool-call",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_wrong_continuation_provider_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+
+    with pytest.raises(ValueError, match="continuation provider.*openai_responses"):
+        await gateway.next_step(
+            messages=[Message(role="tool", content="{}", tool_call_id="call-1")],
+            tools=[ORDER_TOOL],
+            continuation=ModelContinuation(provider="other", token="response-1"),
+        )
+
+    assert client.responses.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_missing_response_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+
+    async def create_without_id(**kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(id="", output=[], output_text="complete", usage=None)
+
+    client.responses.create = create_without_id
+
+    with pytest.raises(ValueError, match="response id"):
+        await gateway.next_step(
+            messages=[Message(role="user", content="Hello")],
+            tools=[],
+        )
+
+
+@pytest.mark.parametrize(
+    ("schema", "error_path"),
+    [
+        (
+            {
+                "type": "object",
+                "properties": {"order_id": {"type": "string"}},
+                "required": ["order_id"],
+            },
+            r"\$\.additionalProperties",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {
+                    "delivery": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": [],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["delivery"],
+                "additionalProperties": False,
+            },
+            r"\$\.properties\.delivery\.required",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {
+                    "destinations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["destinations"],
+                "additionalProperties": False,
+            },
+            r"\$\.properties\.destinations\.items\.required",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_non_strict_tool_schema_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+    schema: dict[str, object],
+    error_path: str,
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+    tool = ToolDefinition(
+        name="query_order_status",
+        description="Query an order",
+        input_schema=schema,
+    )
+
+    with pytest.raises(ValueError, match=error_path):
+        await gateway.next_step(
+            messages=[Message(role="user", content="Order O1001")],
+            tools=[tool],
+        )
+
+    assert client.responses.create_calls == []
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
       - run: python -m pip install pytest
       - run: python -m pytest tests/test_validate_course.py -q
       - run: python scripts/validate_course.py
+      - run: uv sync --group dev --extra live
+        working-directory: reference-implementation
+      - run: uv lock --check
+        working-directory: reference-implementation
+      - run: uv run --group dev --extra live pytest -q
+        working-directory: reference-implementation
+      - run: uv run --group dev --extra live ruff check .
+        working-directory: reference-implementation

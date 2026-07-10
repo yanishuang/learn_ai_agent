@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from agent_course.core import (
     Message,
+    ModelContinuation,
     ModelStep,
     ModelUsage,
     StopReason,
@@ -18,6 +19,7 @@ from agent_course.core import (
 from agent_course.models.base import load_live_settings
 
 StructuredOutput = TypeVar("StructuredOutput", bound=BaseModel)
+_CONTINUATION_PROVIDER = "openai_responses"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,12 +43,29 @@ class OpenAIResponsesGateway:
         self,
         messages: list[Message],
         tools: list[ToolDefinition],
+        *,
+        continuation: ModelContinuation | None = None,
     ) -> ModelStep:
+        request: dict[str, object] = {
+            "model": self.model,
+            "input": [self._message_input(message) for message in messages],
+            "tools": [self._tool_input(tool) for tool in tools],
+        }
+        if continuation is not None:
+            if continuation.provider != _CONTINUATION_PROVIDER:
+                raise ValueError(
+                    "continuation provider must be "
+                    f"{_CONTINUATION_PROVIDER!r}, got {continuation.provider!r}"
+                )
+            request["previous_response_id"] = continuation.token
+
         response = await self._client.responses.create(
-            model=self.model,
-            input=[self._message_input(message) for message in messages],
-            tools=[self._tool_input(tool) for tool in tools],
+            **request,
         )
+
+        response_id = getattr(response, "id", None)
+        if not isinstance(response_id, str) or not response_id.strip():
+            raise ValueError("Responses API returned no usable response id")
 
         tool_calls = tuple(
             self._tool_call(item)
@@ -62,6 +81,10 @@ class OpenAIResponsesGateway:
         return ModelStep(
             content=response.output_text or None,
             tool_calls=tool_calls,
+            continuation=ModelContinuation(
+                provider=_CONTINUATION_PROVIDER,
+                token=response_id,
+            ),
             usage=model_usage,
             stop_reason=(StopReason.TOOL_CALLS if tool_calls else StopReason.COMPLETED),
         )
@@ -96,6 +119,7 @@ class OpenAIResponsesGateway:
 
     @staticmethod
     def _tool_input(tool: ToolDefinition) -> dict[str, object]:
+        _validate_strict_schema(tool.input_schema)
         return {
             "type": "function",
             "name": tool.name,
@@ -117,3 +141,50 @@ class OpenAIResponsesGateway:
             name=item.name,
             arguments=arguments,
         )
+
+
+def _validate_strict_schema(schema: dict[str, object], path: str = "$") -> None:
+    """Validate the documented strict-tool subset without changing the schema."""
+
+    node_type = schema.get("type")
+    object_keywords = {"properties", "required", "additionalProperties"}
+    is_object = path == "$" or node_type == "object" or bool(object_keywords & schema.keys())
+
+    if is_object:
+        if node_type != "object":
+            raise ValueError(f"strict tool schema {path}.type must be 'object'")
+
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            raise ValueError(f"strict tool schema {path}.properties must be an object")
+
+        if schema.get("additionalProperties") is not False:
+            raise ValueError(
+                f"strict tool schema {path}.additionalProperties must be false"
+            )
+
+        required = schema.get("required")
+        if not isinstance(required, list) or not all(
+            isinstance(name, str) for name in required
+        ):
+            raise ValueError(f"strict tool schema {path}.required must be an array")
+
+        missing = [name for name in properties if name not in required]
+        if missing:
+            raise ValueError(
+                f"strict tool schema {path}.required must include every property; "
+                f"missing {missing!r}"
+            )
+
+        for name, child in properties.items():
+            child_path = f"{path}.properties.{name}"
+            if not isinstance(child, dict):
+                raise ValueError(f"strict tool schema {child_path} must be an object")
+            _validate_strict_schema(child, child_path)
+
+    if node_type == "array":
+        items = schema.get("items")
+        items_path = f"{path}.items"
+        if not isinstance(items, dict):
+            raise ValueError(f"strict tool schema {items_path} must be an object")
+        _validate_strict_schema(items, items_path)

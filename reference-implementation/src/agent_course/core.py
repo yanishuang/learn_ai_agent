@@ -30,6 +30,18 @@ class ToolCall(FrozenModel):
     arguments: dict[str, JsonValue]
 
 
+class ModelContinuation(FrozenModel):
+    provider: str
+    token: str
+
+    @field_validator("provider", "token")
+    @classmethod
+    def values_must_be_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("continuation values must be nonblank")
+        return value
+
+
 class ModelUsage(FrozenModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
@@ -52,6 +64,7 @@ class StopReason(StrEnum):
 class ModelStep(FrozenModel):
     content: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
+    continuation: ModelContinuation | None = None
     usage: ModelUsage = Field(default_factory=ModelUsage)
     stop_reason: StopReason = StopReason.COMPLETED
 
@@ -104,4 +117,6 @@ class ModelGateway(Protocol):
         self,
         messages: list[Message],
         tools: list[ToolDefinition],
+        *,
+        continuation: ModelContinuation | None = None,
     ) -> ModelStep: ...
