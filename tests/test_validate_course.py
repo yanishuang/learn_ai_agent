@@ -77,3 +77,18 @@ def test_ecosystem_matrix_reports_missing_maturity_labels(tmp_path: Path) -> Non
     assert validate_repository(tmp_path) == [
         "docs/ecosystem-maturity.md:3: missing maturity label"
     ]
+
+
+def test_ecosystem_matrix_reports_missing_maturity_for_short_row(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "ecosystem-maturity.md").write_text(
+        "| Technology | Role | Maturity | Course status | Verified | Primary source |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| Example SDK | Agent framework |\n",
+        encoding="utf-8",
+    )
+
+    assert validate_repository(tmp_path) == [
+        "docs/ecosystem-maturity.md:3: missing maturity label"
+    ]

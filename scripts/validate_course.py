@@ -134,7 +134,7 @@ def _validate_ecosystem_maturity(root: Path) -> list[str]:
             break
         if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
             continue
-        maturity = cells[maturity_index]
+        maturity = cells[maturity_index] if maturity_index < len(cells) else ""
         if not maturity:
             errors.append(f"docs/ecosystem-maturity.md:{line_number}: missing maturity label")
         elif maturity.casefold() not in MATURITY_LABELS:
