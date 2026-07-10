@@ -483,6 +483,7 @@ git commit -m "docs: add production and capstone teaching chapters"
 ### Task 8: Scaffold The Deterministic Reference Implementation
 
 **Files:**
+- Modify: `.github/workflows/course-ci.yml`
 - Create: `reference-implementation/pyproject.toml`
 - Create: `reference-implementation/.env.example`
 - Create: `reference-implementation/README.md`
@@ -503,7 +504,8 @@ git commit -m "docs: add production and capstone teaching chapters"
   - `RunContext.require(permission: str) -> None`
   - `RunContext(user_id: str, tenant_id: str, request_id: str, permissions: frozenset[str])`
   - `RunLimits(max_turns: int, max_tool_calls: int, max_output_tokens: int, timeout_seconds: float)`
-  - `ModelGateway.next_step(messages: list[Message], tools: list[ToolDefinition]) -> ModelStep`
+  - `ModelContinuation(provider: str, token: str)` as explicit caller-owned provider state.
+  - `ModelGateway.next_step(messages: list[Message], tools: list[ToolDefinition], *, continuation: ModelContinuation | None = None) -> ModelStep`. With a continuation, `messages` contains only input items produced since the previous model step.
   - `FakeModelGateway` and `OpenAIResponsesGateway`.
   - `OpenAIAgentsRunner.from_environment()` for the SDK-managed live path.
 
@@ -545,7 +547,7 @@ Expected: import failure.
 
 - [ ] **Step 3: Implement core types and Fake Model**
 
-Use frozen Pydantic models for messages, tool calls, model steps, tool results, and run limits. Fake behavior must be deterministic and selected by explicit fixture phrases, not random generation.
+Use frozen Pydantic models for messages, tool calls, model continuations, model steps, tool results, and run limits. Fake behavior must be deterministic and selected by exact fixture phrases, not substring matching or random generation.
 
 - [ ] **Step 4: Define and lock dependency groups**
 
@@ -563,6 +565,8 @@ OPENAI_MODEL must be non-empty
 
 It must use native Responses structured outputs where a structured result is requested.
 
+For tool loops, it must return the public Responses response ID as a `ModelContinuation`, accept that continuation on the next step, and send it as `previous_response_id`. The gateway must remain stateless; the application owns and persists continuation state. Strict tool schemas must be validated locally before sending `strict: true`, with a clear schema-path diagnostic.
+
 `OpenAIAgentsRunner.from_environment()` uses the same gate and provides the SDK-managed path used by Chapter 6. Default tests assert that both live adapters refuse to initialize when the gate is absent; they do not call the network.
 
 - [ ] **Step 6: Create and lock the environment**
@@ -577,6 +581,8 @@ uv run --group dev --extra live pytest tests/test_fake_model.py -q
 ```
 
 Expected: pass without a live API call.
+
+Remove any Python-version-based pytest collection bypass. Extend the existing Python 3.12 CI workflow to install `uv`, run `uv lock --check`, run the complete reference suite, and run Ruff explicitly from `reference-implementation/`.
 
 - [ ] **Step 7: Commit**
 
@@ -638,7 +644,7 @@ Test correct tool use, repeated-call stop, max-turn stop, timeout, structured pe
 
 - [ ] **Step 3: Implement tools and runner**
 
-The registry rejects unknown fields before calling a handler. The runner applies input guardrails, loads and appends session messages, records each model step and tool result, increments budgets, and returns a typed stop reason. It never retries permission, policy, or validation failures.
+The registry rejects unknown fields before calling a handler. The runner applies input guardrails, loads and appends session messages, records each model step and tool result, increments budgets, and returns a typed stop reason. It keeps `ModelContinuation` as explicit run state and passes only newly produced tool-result messages when continuing a provider response. It never retries permission, policy, or validation failures.
 
 - [ ] **Step 4: Run tests**
 
