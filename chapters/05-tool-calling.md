@@ -1,6 +1,6 @@
 # 第 5 章：Tool Calling / Function Calling
 
-更新时间：2026-07-09
+更新时间：2026-07-10
 建议学习时间：5-7 天  
 适合阶段：已经能完成模型调用和 Prompt 管理，准备让模型使用外部工具  
 本章产出：3 个可调用工具、一个 Tool Calling API、一套工具权限校验、一张工具调用日志表、一份危险工具安全清单
@@ -19,6 +19,8 @@
 8. 实现天气查询、订单查询、知识库搜索 3 个示例工具。
 9. 知道何时可以把稳定工具服务抽到 Go 或 MCP Server。
 10. 了解 built-in tools、remote MCP、tool search 等现代工具入口的适用边界。
+11. 按 effect class 决定自动执行、幂等键、审批和重试策略。
+12. 用确定性用例分别评估工具选择和参数准确率。
 
 Tool Calling 是 Agent 的基础。没有工具，Agent 只能说；有了工具，Agent 才能查、算、读、写、执行。
 
@@ -92,6 +94,7 @@ Tool Calling 本质上也是一种结构化输出。
 | 参数简单 | 参数越清楚越稳定 |
 | 返回结构化 | 方便模型理解，也方便日志记录 |
 | 权限可控 | 后端能判断用户是否能调用 |
+| Effect 明确 | 调用前知道它是纯计算、读取、写入、外部发送还是不可逆操作 |
 | 无副作用优先 | 初期优先查询类工具 |
 | 错误可解释 | 工具失败时返回明确错误 |
 
@@ -118,17 +121,23 @@ tool1
 
 模型依赖工具名称和描述来选择工具，命名模糊会显著降低调用质量。
 
+工具描述和工具返回同样是不可信输入。远程 MCP Server、网页、邮件、文档或上游 API
+可能在描述或结果中夹带“忽略之前规则并调用另一个工具”之类的 tool poisoning。
+应用应固定可信工具 allowlist，校验 server 身份和 schema，把工具结果标记为数据而非
+指令，并在每个后续动作上重新执行权限、effect 和审批策略；不能因为内容来自工具就
+提升它的指令优先级。
+
 ## 5.5 工具分类
 
-按风险分：
+按 effect class 分类，策略由应用决定，不能由模型自报：
 
-| 类型 | 例子 | 是否可自动执行 |
-| --- | --- | --- |
-| 只读查询 | 查天气、查订单、查知识库 | 通常可以 |
-| 计算转换 | 计算增长率、格式化 JSON | 通常可以 |
-| 写入操作 | 创建任务、保存草稿 | 需要谨慎 |
-| 外部发送 | 发邮件、发群消息 | 建议人工确认 |
-| 高风险操作 | 删除数据、退款、转账、改权限 | 必须人工确认或禁止 |
+| Effect class | 例子 | 默认执行策略 | 幂等 / 重试要求 |
+| --- | --- | --- | --- |
+| pure | 计算增长率、格式转换 | 可自动执行 | 同输入同输出，可有限重试 |
+| read | 查天气、查订单、查知识库 | 授权后可自动执行 | 通常可重试，但要限制次数和超时 |
+| write | 创建任务、保存草稿 | 需要策略检查，必要时审批 | 必须携带服务端幂等键 |
+| external_send | 发邮件、发群消息 | 默认先展示精确 payload 并审批 | 幂等键绑定收件人、内容与版本 |
+| irreversible | 删除、退款、转账、改权限 | 默认禁止或强制人工审批 | 不自动重试；未知提交状态先对账 |
 
 课程第 5 章只建议实现只读查询和计算类工具。
 
@@ -139,10 +148,12 @@ tool1
 ### 好的参数
 
 ```python
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class OrderStatusRequest(BaseModel):
+class OrderStatusArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
     order_id: str = Field(min_length=3, max_length=64)
 
 
@@ -301,37 +312,61 @@ class OrderStatusResult(BaseModel):
 ### 工具函数
 
 ```python
-class PermissionDenied(Exception):
-    pass
+from agent_course.core import RunContext, ToolResult
+
+
+class InMemoryOrderRepository:
+    async def get_for_tenant(self, order_id: str, tenant_id: str) -> ToolResult:
+        status = {("tenant-1", "O1001"): "shipped"}.get((tenant_id, order_id))
+        if status is None:
+            return ToolResult(
+                name="query_order_status",
+                code="NOT_FOUND",
+                success=False,
+                error="order was not found in the caller's tenant",
+            )
+        return ToolResult(
+            name="query_order_status",
+            code="OK",
+            success=True,
+            output={"order_id": order_id, "status": status},
+        )
+
+
+order_repository = InMemoryOrderRepository()
 
 
 async def query_order_status(
-    user_id: str,
-    order_id: str,
-) -> OrderStatusResult:
-    if not await can_view_order(user_id=user_id, order_id=order_id):
-        raise PermissionDenied("当前用户无权查看该订单")
-
-    # 课程示例先使用假数据；真实项目里查询订单服务或数据库。
-    if order_id != "O1001":
-        raise ValueError("未找到该订单")
-
-    return OrderStatusResult(
-        order_id="O1001",
-        status="已发货",
-        logistics_company="顺丰",
-        tracking_no="SF123456",
-        latest_event="包裹已到达上海转运中心",
+    arguments: OrderStatusArguments,
+    context: RunContext,
+) -> ToolResult:
+    context.require("orders:read")
+    return await order_repository.get_for_tenant(
+        order_id=arguments.order_id,
+        tenant_id=context.tenant_id,
     )
-
-
-async def can_view_order(user_id: str, order_id: str) -> bool:
-    return user_id == "u_001" and order_id == "O1001"
 ```
 
 ### 重要提醒
 
-权限检查不能交给模型判断。模型只能提出“想查订单”，后端必须根据真实用户身份和资源权限判断是否允许。
+这是可信 handler 的精确边界：模型只产生 `OrderStatusArguments`，`RunContext` 由
+认证后的服务器请求注入。模型可见的 strict schema 只有 `order_id`：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "order_id": {"type": "string", "minLength": 1, "maxLength": 64}
+  },
+  "required": ["order_id"],
+  "additionalProperties": false
+}
+```
+
+`user_id`、`tenant_id`、`request_id`、`permissions` 和审批状态都不能出现在模型
+参数里。参考实现的 `StrictToolArguments` 使用 `extra="forbid"`；模型若追加
+`tenant_id` 或 `user_id`，registry 在 handler 运行前返回 `INVALID_ARGUMENTS`。
+`context.require("orders:read")` 失败返回 `PERMISSION_DENIED`，不会重试。
 
 ## 5.11 示例：知识库搜索工具
 
@@ -386,41 +421,47 @@ async def search_course_knowledge(query: str, top_k: int = 5) -> KnowledgeSearch
 
 ## 5.12 多工具调用服务
 
-当系统有多个工具时，建议统一管理工具元数据。
+当系统有多个工具时，使用 registry 统一暴露 schema 和执行入口。参考实现中
+`ToolRegistry.execute(name, arguments, context)` 先定位 allowlist 中的工具；具体
+`StructuredTool` 再完成 strict Pydantic 校验与 `RunContext.require()`，不会对未知
+工具做动态 import 或按模型给出的 URL 发请求。
 
 ```python
-from dataclasses import dataclass
-from typing import Awaitable, Callable
+from collections.abc import Iterable
+
+from agent_course.core import RunContext, ToolDefinition, ToolResult
+from agent_course.tools.base import StructuredTool
 
 
-@dataclass(frozen=True)
-class ToolSpec:
-    name: str
-    description: str
-    risk_level: str
-    handler: Callable[..., Awaitable[object]]
+class ToolRegistry:
+    def __init__(self, tools: Iterable[StructuredTool] = ()) -> None:
+        self._tools: dict[str, StructuredTool] = {}
+        for tool in tools:
+            self.register(tool)
 
+    def register(self, tool: StructuredTool) -> None:
+        if tool.name in self._tools:
+            raise ValueError(f"tool is already registered: {tool.name}")
+        self._tools[tool.name] = tool
 
-TOOLS = {
-    "get_current_weather": ToolSpec(
-        name="get_current_weather",
-        description="查询指定城市当前天气。",
-        risk_level="low",
-        handler=get_current_weather,
-    ),
-    "query_order_status": ToolSpec(
-        name="query_order_status",
-        description="根据订单号查询订单状态。必须先校验用户权限。",
-        risk_level="medium",
-        handler=query_order_status,
-    ),
-    "search_course_knowledge": ToolSpec(
-        name="search_course_knowledge",
-        description="搜索 AI Agent 课程知识库。",
-        risk_level="low",
-        handler=search_course_knowledge,
-    ),
-}
+    def definitions(self) -> list[ToolDefinition]:
+        return [tool.definition for tool in self._tools.values()]
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict,
+        context: RunContext,
+    ) -> ToolResult:
+        tool = self._tools.get(name)
+        if tool is None:
+            return ToolResult(
+                name=name,
+                code="UNKNOWN_TOOL",
+                success=False,
+                error="tool is not registered",
+            )
+        return await tool.execute(arguments, context=context)
 ```
 
 统一管理的好处：
@@ -430,7 +471,108 @@ TOOLS = {
 - 能统一做日志。
 - 能逐步迁移到 MCP Server。
 
-### 5.12.1 现代工具入口：内置工具、remote MCP 与 tool search
+### 5.12.1 完整的低层 Responses 工具循环
+
+下面循环就是参考实现 `BoundedAgentRunner` 与 `OpenAIResponsesGateway` 之间的
+continuation 合同。它可注入 `FakeModelGateway` 做默认离线测试；只有显式满足
+`AGENT_COURSE_LIVE_TESTS=1`、`OPENAI_API_KEY` 和 `OPENAI_MODEL` 三个条件时，才
+注入 `OpenAIResponsesGateway.from_environment()` 发起付费 Live 调用。
+
+```python
+import asyncio
+import json
+
+from agent_course.core import (
+    Message,
+    ModelGateway,
+    RunContext,
+    RunLimits,
+    StopReason,
+)
+from agent_course.tools.registry import ToolRegistry
+
+
+class ToolLoopError(RuntimeError):
+    pass
+
+
+async def run_responses_tool_loop(
+    question: str,
+    model: ModelGateway,
+    tools: ToolRegistry,
+    context: RunContext,
+    limits: RunLimits,
+) -> str:
+    messages = [Message(role="user", content=question)]
+    model_input = list(messages)
+    continuation = None
+    seen_calls: set[str] = set()
+    tool_call_count = 0
+    output_tokens = 0
+
+    async with asyncio.timeout(limits.timeout_seconds):
+        for _turn in range(limits.max_turns):
+            step = await model.next_step(
+                model_input,
+                tools.definitions(),
+                continuation=continuation,
+            )
+            continuation = step.continuation
+            output_tokens += step.usage.output_tokens
+            if output_tokens > limits.max_output_tokens:
+                raise ToolLoopError(StopReason.MAX_OUTPUT_TOKENS.value)
+
+            if step.content is not None:
+                messages.append(Message(role="assistant", content=step.content))
+
+            if not step.tool_calls:
+                if step.stop_reason is StopReason.TOOL_CALLS or step.content is None:
+                    raise ToolLoopError(StopReason.MODEL_ERROR.value)
+                return step.content
+
+            tool_messages: list[Message] = []
+            for call in step.tool_calls:
+                fingerprint = json.dumps(
+                    [call.name, call.arguments],
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                if fingerprint in seen_calls:
+                    raise ToolLoopError(StopReason.REPEATED_TOOL_CALL.value)
+                if tool_call_count >= limits.max_tool_calls:
+                    raise ToolLoopError(StopReason.MAX_TOOL_CALLS.value)
+                seen_calls.add(fingerprint)
+                tool_call_count += 1
+
+                result = await tools.execute(call.name, call.arguments, context)
+                result = result.model_copy(update={"call_id": call.id})
+                tool_message = Message(
+                    role="tool",
+                    content=result.model_dump_json(),
+                    tool_call_id=call.id,
+                )
+                messages.append(tool_message)
+                tool_messages.append(tool_message)
+                if not result.success:
+                    raise ToolLoopError(f"{result.code}: {result.error}")
+
+            # Responses continuation 存在时，只发新增工具结果；gateway 会把它们
+            # 转成 function_call_output，并传 previous_response_id。
+            model_input = (
+                tool_messages if continuation is not None else list(messages)
+            )
+
+    raise ToolLoopError(StopReason.MAX_TURNS.value)
+```
+
+第一轮 Live 请求发送用户消息和 strict 工具 schema。gateway 从公开 response ID
+构造 `ModelContinuation(provider="openai_responses", token=response.id)`；第二轮只把
+新增 `tool` 消息翻译成 `function_call_output`，并设置
+`previous_response_id=continuation.token`。不要同时重发旧 transcript。gateway 不保存
+response ID；应用把 continuation 与 run 状态一起持有和持久化。
+
+### 5.12.2 现代工具入口：内置工具、remote MCP 与 tool search
 
 2026 年的 Agent 工具生态已经不只是一组本地 Python 函数。学习时可以按下面三层理解：
 
@@ -454,7 +596,7 @@ TOOLS = {
 
 ## 5.13 参数校验
 
-参数校验至少包括：
+模型参数是不可信输入。参数校验至少包括：
 
 - 类型。
 - 必填。
@@ -466,10 +608,12 @@ TOOLS = {
 示例：
 
 ```python
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class SafeOrderRequest(BaseModel):
+class SafeOrderArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     order_id: str = Field(min_length=3, max_length=64)
 
     @field_validator("order_id")
@@ -480,7 +624,9 @@ class SafeOrderRequest(BaseModel):
         return value
 ```
 
-参数校验失败时，不要直接让模型换个参数重试无数次。应该把错误返回给模型，必要时追问用户。
+strict tool schema 还应在请求模型前本地检查：根节点必须是 object，每个 object
+设置 `additionalProperties: false`，并把所有 properties 列入 required。参数校验失败
+是终止性错误，不应让模型无限改写；需要用户信息时返回明确追问。
 
 ## 5.14 权限校验
 
@@ -500,14 +646,22 @@ class SafeOrderRequest(BaseModel):
 只在 prompt 里写：“不要查询无权限订单。”
 ```
 
-正确做法：
+正确做法是把身份与权限放在可信上下文，并把模型参数限制在资源标识：
 
 ```python
-if not await can_view_order(user_id, order_id):
-    raise PermissionDenied("当前用户无权查看该订单")
+async def query_order_status(
+    arguments: OrderStatusArguments,
+    context: RunContext,
+) -> ToolResult:
+    context.require("orders:read")
+    return await order_repository.get_for_tenant(
+        order_id=arguments.order_id,
+        tenant_id=context.tenant_id,
+    )
 ```
 
-Prompt 是提示，权限是后端规则。
+Prompt 是提示，`RunContext.require()`、tenant-scoped repository 查询和资源所有权检查
+才是后端规则。HTTP 请求体、模型 arguments 和工具结果都不能覆盖 `RunContext`。
 
 ## 5.15 工具调用日志
 
@@ -519,7 +673,7 @@ Prompt 是提示，权限是后端规则。
 | run_id | 所属 Agent run |
 | user_id | 调用用户 |
 | tool_name | 工具名 |
-| arguments | 参数，敏感字段脱敏 |
+| arguments | 参数摘要或哈希，敏感字段在存储边界脱敏 |
 | result_summary | 结果摘要 |
 | status | success / failed / blocked |
 | error_code | 错误码 |
@@ -546,12 +700,13 @@ create table tool_call_logs (
 日志注意：
 
 - 不记录完整敏感信息。
-- 参数要可追溯。
+- 参数用受控摘要、哈希或字段级脱敏保持可追溯，不保存原始秘密。
 - 失败原因要可分析。
 - 高风险工具要记录人工确认人。
 
 ## 5.16 危险工具与人工确认
 
+write、external_send 和 irreversible effect 的工具不能只靠一句通用“是否确认”。
 高风险工具包括：
 
 - 删除数据。
@@ -584,6 +739,14 @@ flowchart TD
 - 确认人。
 - 确认时间。
 
+审批记录必须绑定不可歧义的 payload：工具名、规范化参数、租户、资源、effect class、
+版本和内容哈希。执行时重新计算哈希；参数或版本变化就要求重新审批，不能把旧批准复用
+到新 payload。审批人和请求者身份都来自可信上下文。
+
+对有副作用的调用，服务端在执行前生成幂等键，并持久化
+`(tenant_id, tool_name, idempotency_key, payload_hash, status)`。同一键同一 payload 返回
+已有结果；同一键不同 payload 返回冲突。不要让模型自由生成或改写幂等键。
+
 ## 5.17 工具调用失败后的处理
 
 常见失败：
@@ -606,12 +769,27 @@ flowchart TD
 }
 ```
 
-模型收到失败结果后可以：
+先按错误类别决定是否重试：
+
+| 失败类别 | 自动重试 |
+| --- | --- |
+| 参数校验、未知工具 | 否；修正应用或追问用户 |
+| 权限、策略、审批拒绝 | 否；终止当前动作 |
+| 资源不存在 | 否；除非用户提供新资源标识 |
+| read 工具瞬时超时 / 限流 | 可，有限次数、指数退避加抖动 |
+| 有幂等键的 write 瞬时失败 | 仅在服务端可确认幂等语义时有限重试 |
+| irreversible 或提交结果未知 | 否；先查询事务状态或人工对账 |
+
+参考 `BoundedAgentRunner` 对 `PERMISSION_DENIED`、`POLICY_DENIED` 和
+`INVALID_ARGUMENTS` 都不重试，并用 `max_turns`、`max_tool_calls`、
+`max_output_tokens`、timeout 和重复调用指纹限制循环。
+
+在允许继续的失败上，模型可以：
 
 - 追问用户补充参数。
 - 换一个工具。
 - 告诉用户无法完成。
-- 在可重试错误上尝试有限次数重试。
+- 在应用策略判定为可重试的错误上尝试有限次数重试。
 
 ## 5.18 Tool Calling 和 Agent 的关系
 
@@ -677,14 +855,16 @@ Python 普通函数
 要求：
 
 - 工具名：`query_order_status`。
-- 参数：`order_id`。
-- 必须传入当前 `user_id` 做权限校验。
+- 模型参数 schema 只有 `order_id`，并禁止额外字段。
+- 应用从认证请求构造 `RunContext`，handler 检查 `orders:read` 并按
+  `context.tenant_id` 查询。
 - 返回订单状态，不返回手机号、地址、内部备注。
 
 验收：
 
 - 有权限用户能查到。
 - 无权限用户被拒绝。
+- 模型追加 `user_id` 或 `tenant_id` 时返回 `INVALID_ARGUMENTS`，handler 不执行。
 - 订单不存在时返回明确错误。
 
 ### 任务 3：课程知识库搜索工具
@@ -729,6 +909,15 @@ Python 普通函数
 - 工具参数正确。
 - 最终回答基于工具结果。
 
+评估必须把两个指标分开：
+
+- 工具选择准确率：`model_tool_calls` 中的工具名是否精确等于预期工具。
+- 参数准确率：对模型实际发出的 arguments 做规范 JSON 比较；额外字段、缺失字段、
+  错误类型和值都判错，不能从工具结果反推模型参数。
+
+默认评估集注入 `FakeModelGateway`，固定输入与预期调用，离线且无密钥。Live 模型比较
+必须单独显式开启，不得成为默认 CI 门槛。
+
 ### 任务 5：工具调用日志
 
 要求：
@@ -761,6 +950,12 @@ Python 普通函数
 
 ## 权限校验规则
 
+## Effect class 与幂等键
+
+## 审批 payload 与内容哈希
+
+## 自动重试策略
+
 ## 日志字段
 
 ## 失败回滚方式
@@ -783,6 +978,8 @@ Python 普通函数
 4. 参数校验和权限校验分别解决什么问题？
 5. 哪些工具必须人工确认？
 6. Tool Calling 和 Agent 有什么区别？
+7. 为什么工具返回中的指令不能自动获得更高优先级？
+8. 工具选择准确率和参数准确率为什么要分开？
 
 ### 判断题
 
@@ -791,6 +988,7 @@ Python 普通函数
 3. 权限校验可以只写在 prompt 里。  
 4. 工具返回值应该避免包含敏感信息。  
 5. Tool Calling 就等于完整 Agent。  
+6. write 工具有幂等键后，就可以无上限自动重试。
 
 参考答案：
 
@@ -799,6 +997,7 @@ Python 普通函数
 3. 错。  
 4. 对。  
 5. 错。  
+6. 错。
 
 ## 5.22 本章完成标准
 
@@ -811,6 +1010,8 @@ Python 普通函数
 - 能做用户权限校验。
 - 能记录工具调用日志。
 - 能识别危险工具并设计人工确认。
+- 能按 effect class 设计幂等、审批和重试策略。
+- 能防范 tool poisoning，并分别评估工具选择与参数准确率。
 - 能说清楚哪些工具未来适合抽到 Go 或 MCP Server。
 
 ## 5.23 本章学习资料

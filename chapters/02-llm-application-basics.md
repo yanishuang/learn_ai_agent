@@ -1,6 +1,6 @@
 # 第 2 章：大模型应用基础
 
-更新时间：2026-07-09
+更新时间：2026-07-10
 建议学习时间：3-5 天  
 适合阶段：已经理解 AI Agent 全景，准备开始动手调用大模型  
 本章产出：一个 FastAPI 大模型问答 API、一个结构化输出接口、一个 SSE 流式响应接口、一份调用日志与错误处理清单
@@ -130,27 +130,59 @@ uv add fastapi uvicorn openai pydantic pydantic-settings python-dotenv
 `.env.example`：
 
 ```text
-OPENAI_API_KEY=your_api_key
-OPENAI_MODEL=gpt-4.1-mini
+# 只有显式设置为 1 才允许构造 Live adapter。
+AGENT_COURSE_LIVE_TESTS=
+OPENAI_API_KEY=
+OPENAI_MODEL=
 REQUEST_TIMEOUT_SECONDS=60
 ```
 
 `app/settings.py`：
 
 ```python
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
+from dataclasses import dataclass
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+class LiveConfigurationError(RuntimeError):
+    pass
 
+
+@dataclass(frozen=True)
+class LiveSettings:
     openai_api_key: str
-    openai_model: str = "gpt-4.1-mini"
-    request_timeout_seconds: int = 60
+    openai_model: str
+    request_timeout_seconds: int
 
 
-settings = Settings()
+def load_live_settings() -> LiveSettings:
+    missing: list[str] = []
+    if os.getenv("AGENT_COURSE_LIVE_TESTS") != "1":
+        missing.append("AGENT_COURSE_LIVE_TESTS=1")
+
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    model = os.getenv("OPENAI_MODEL", "")
+    if not api_key.strip():
+        missing.append("OPENAI_API_KEY must be non-empty")
+    if not model.strip():
+        missing.append("OPENAI_MODEL must be non-empty")
+    if missing:
+        raise LiveConfigurationError(
+            "live adapter is disabled; required: " + ", ".join(missing)
+        )
+
+    return LiveSettings(
+        openai_api_key=api_key.strip(),
+        openai_model=model.strip(),
+        request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "60")),
+    )
 ```
+
+不要在默认应用组合的模块导入时调用 `load_live_settings()`。下面的
+`app.ai.client` 是 Live-only adapter，默认 Fake 组合不得导入它。默认练习和自动测试
+使用 `FakeModelGateway`，应当离线、无密钥、无网络且可重复；只有付费的 Live 对比
+实验才加载 Live adapter。Live 模式没有默认模型，`OPENAI_MODEL` 必须由操作者明确
+选择。
 
 ## 2.7 实践一：普通问答 API
 
@@ -201,9 +233,10 @@ class ChatResponse(BaseModel):
 ```python
 from openai import AsyncOpenAI
 
-from app.settings import settings
+from app.settings import load_live_settings
 
 
+settings = load_live_settings()
 client = AsyncOpenAI(
     api_key=settings.openai_api_key,
     timeout=settings.request_timeout_seconds,
@@ -215,8 +248,7 @@ client = AsyncOpenAI(
 `app/ai/service.py`：
 
 ```python
-from app.ai.client import client
-from app.settings import settings
+from app.ai.client import client, settings
 
 
 SYSTEM_PROMPT = """
@@ -234,7 +266,6 @@ async def chat(message: str) -> str:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": message},
         ],
-        temperature=0.2,
     )
     return response.output_text
 ```
@@ -322,47 +353,46 @@ class LessonAnswer(BaseModel):
 
 ### Service 示例
 
-先让模型输出 JSON，再用 Pydantic 校验。第 7 章进入 RAG 后，`citations` 应该来自真实检索结果，而不是模型自由编造。
+Live adapter 使用 Responses API 的原生结构化输出，让 SDK 按 Pydantic 类型解析；
+应用仍然要处理拒绝、缺失输出和上游错误。第 7 章进入 RAG 后，`citations`
+必须来自真实检索结果，而不是模型自由编造。
 
 ```python
-import json
-
-from pydantic import ValidationError
-
-from app.ai.client import client
+from app.ai.client import client, settings
 from app.ai.schemas import LessonAnswer
-from app.settings import settings
 
 
-STRUCTURED_PROMPT = """
+SYSTEM_PROMPT = """
 你是 AI Agent 课程助教。
-请回答用户问题，并只返回 JSON。
-
-JSON 字段：
-- answer: 字符串，直接回答
-- confidence: high、medium、low 之一
-- citations: 数组，当前没有检索资料时返回空数组
-- missing_info: 字符串或 null，说明还缺什么信息
-
-不要输出 Markdown，不要输出 JSON 以外的解释。
+请准确回答；没有检索资料时 citations 必须为空数组，不要编造来源。
 """.strip()
 
 
 async def structured_chat(message: str) -> LessonAnswer:
-    response = await client.responses.create(
+    response = await client.responses.parse(
         model=settings.openai_model,
         input=[
-            {"role": "system", "content": STRUCTURED_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": message},
         ],
-        temperature=0.1,
+        text_format=LessonAnswer,
     )
-    try:
-        payload = json.loads(response.output_text)
-        return LessonAnswer.model_validate(payload)
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise ValueError(f"模型结构化输出校验失败: {exc}") from exc
+    if response.output_parsed is None:
+        raise ValueError("Responses API returned no parsed output")
+    return response.output_parsed
 ```
+
+参考实现中的 `OpenAIResponsesGateway.parse_structured()` 使用同一合同：模型来自
+显式的 `OPENAI_MODEL`，调用 `AsyncOpenAI.responses.parse()`，并在
+`output_parsed` 缺失时失败。构造 gateway 仍受 `AGENT_COURSE_LIVE_TESTS=1`、
+非空 Key 和非空模型三重门禁约束。
+
+### 兼容说明：Prompt-only JSON
+
+只有旧模型或兼容服务不支持原生结构化输出时，才在 prompt 中要求“只返回 JSON”，
+再对 `response.output_text` 执行 `json.loads()` 和
+`LessonAnswer.model_validate()`。这是兼容路径，不是本章主线；它必须捕获
+`JSONDecodeError` / `ValidationError`，不得把解析失败的文本传给业务流程。
 
 ### Route 示例
 
@@ -397,7 +427,8 @@ async def structured_endpoint(request: ChatRequest) -> LessonAnswer:
 }
 ```
 
-如果模型输出不是合法 JSON，后端必须报错或重试，不能把脏数据继续传给业务流程。
+如果结构化结果缺失或校验失败，后端必须报错或按受控策略重试，不能把脏数据继续传给
+业务流程。
 
 ## 2.9 实践三：SSE 流式响应
 
@@ -415,43 +446,74 @@ async def structured_endpoint(request: ChatRequest) -> LessonAnswer:
 ### Service 示例
 
 ```python
+import asyncio
+import json
 from collections.abc import AsyncIterator
+from collections.abc import Awaitable, Callable
 
-from app.ai.client import client
-from app.settings import settings
+from app.ai.client import client, settings
 
 
-async def stream_chat(message: str) -> AsyncIterator[str]:
-    stream = await client.responses.create(
-        model=settings.openai_model,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": message},
-        ],
-        temperature=0.2,
-        stream=True,
-    )
+def sse_event(event: str, data: object) -> str:
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event}\ndata: {payload}\n\n"
 
-    async for event in stream:
-        if event.type == "response.output_text.delta":
-            yield event.delta
+
+async def stream_chat(
+    message: str,
+    is_disconnected: Callable[[], Awaitable[bool]],
+) -> AsyncIterator[str]:
+    try:
+        async with client.responses.stream(
+            model=settings.openai_model,
+            input=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+        ) as stream:
+            async for event in stream:
+                if await is_disconnected():
+                    return
+                if event.type == "response.output_text.delta":
+                    yield sse_event("delta", {"text": event.delta})
+            yield sse_event("done", {"status": "completed"})
+    except asyncio.CancelledError:
+        # Starlette 取消响应生成器时继续传播取消；async with 会关闭上游流。
+        raise
 ```
 
 ### Route 示例
 
 ```python
+import asyncio
+
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 
 @router.post("/stream")
-async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
+async def stream_endpoint(
+    payload: ChatRequest,
+    request: Request,
+) -> StreamingResponse:
     async def event_source():
-        async for chunk in stream_chat(request.message):
-            yield f"data: {chunk}\\n\\n"
-        yield "event: done\\ndata: [DONE]\\n\\n"
+        try:
+            async for event in stream_chat(payload.message, request.is_disconnected):
+                yield event
+        except asyncio.CancelledError:
+            raise
 
-    return StreamingResponse(event_source(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 ```
+
+SSE 的每个 `data:` 都是合法 JSON，文本中的换行符会被 JSON 转义，不会破坏
+事件边界。`request.is_disconnected()` 处理已可观察到的断连，
+`CancelledError` 处理 ASGI 服务器主动取消；两条路径都会离开 `async with` 并关闭
+上游 Responses 流。不要吞掉取消异常，也不要在客户端离开后继续生成和计费。
 
 ### 前端接收方式
 
@@ -470,7 +532,7 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 | --- | --- |
 | API Key 缺失 | 启动时失败，提示配置环境变量 |
 | 请求超时 | 返回可重试错误，记录超时阶段 |
-| 模型限流 | 指数退避重试，必要时降级模型 |
+| 模型限流 | 仅对可安全重放的请求做有上限、带抖动的退避；记录重试次数 |
 | 输出格式错误 | 结构化接口必须重试或报错 |
 | 内容过长 | 截断输入、摘要历史、提示用户缩小范围 |
 | 上游不可用 | 返回友好错误，不暴露内部堆栈 |
@@ -505,7 +567,7 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 
 - 检索到哪些文档。
 - 调用了哪些工具。
-- 工具参数是什么。
+- 工具参数摘要是什么（敏感字段脱敏，不保存原始参数）。
 - 每轮 Agent 的停止原因。
 - token、费用和耗时。
 
@@ -539,13 +601,15 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 要求：
 
 - 使用 FastAPI。
-- 使用 OpenAI SDK。
+- 默认注入 `FakeModelGateway`，离线且不要求 API Key。
 - `POST /api/ai/chat` 能返回中文回答。
-- API Key 从环境变量读取。
+- 可选 Live adapter 使用 OpenAI SDK，并只从环境变量读取 Key 和显式模型名。
 
 验收：
 
 - 能回答“什么是 AI Agent”。
+- 默认测试不导入可选 Live 包，也不访问网络。
+- 缺少精确 Live 开关、非空 Key 或非空 `OPENAI_MODEL` 时，Live adapter 拒绝构造。
 - 控制台不打印 API Key。
 - 空字符串输入会被 Pydantic 拦截。
 
@@ -554,7 +618,9 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 要求：
 
 - `POST /api/ai/structured` 返回 `answer`、`confidence`、`citations`、`missing_info`。
-- 使用 Pydantic 校验。
+- Live 路径使用 `responses.parse(..., text_format=LessonAnswer)`。
+- 模型参数来自显式 `OPENAI_MODEL`，没有硬编码默认值。
+- Prompt-only JSON 只作为兼容路径，并继续使用 Pydantic 校验。
 - 非法输出不能静默通过。
 
 验收：
@@ -569,12 +635,12 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 
 - `POST /api/ai/stream` 使用 SSE 返回。
 - 前端或 `curl -N` 能看到分片输出。
-- 最后发送 done 事件。
+- 每个事件的 `data:` 是 JSON，最后发送 `done` 事件。
 
 验收：
 
 - 长回答不需要等到全部生成完成。
-- 客户端断开时服务端不会继续无限执行。
+- 客户端断开或任务取消时，上游流被关闭，服务端不会继续无限执行。
 
 ### 任务 4：调用日志
 
@@ -601,7 +667,7 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 ### 判断题
 
 1. API Key 可以临时写在代码里，只要不截图就行。  
-2. 结构化输出只要 prompt 写“返回 JSON”就一定可靠。  
+2. 原生结构化输出成功后，就不需要检查 `output_parsed`。
 3. 模型调用日志应该记录 request_id、模型、耗时和失败原因。  
 4. 流式输出可以改善长回答的用户体验。  
 
