@@ -1,372 +1,425 @@
 # 第 8 章：Workflow 与持久化执行
 
-更新时间：2026-07-09
+更新时间：2026-07-10
 建议学习时间：5-7 天  
-适合阶段：已经能实现单 Agent，但发现部分任务需要更稳定、可恢复、可审计的流程  
-本章产出：一个可恢复的深度研究 Workflow，支持状态持久化、步骤日志、失败重试和人工确认
+本章产出：一个版本化、可暂停审批、可恢复、可取消、可超时且有幂等冲突检查的离线研究 Workflow；以及一份生产持久化、重试和副作用提交设计。
 
-## 8.1 本章学习目标
+## 本章定位
 
-学完本章后，你应该能做到：
+Agent 适合在边界内选择下一步，Workflow 适合明确保存“现在走到哪里、下一步允许做什么、失败后从哪里继续”。只要任务包含长等待、人工输入、审批、重试或不可逆副作用，就不能把可靠性寄托在一次 HTTP 请求或模型记忆上。
 
-1. 判断什么时候应该用 Workflow，而不是 Agent 自主循环。
-2. 设计任务状态、步骤状态和失败状态。
-3. 使用 Python 函数组合或 LangGraph 实现多步骤流程。
-4. 为长任务增加 checkpoint、重试、超时和人工确认。
-5. 设计幂等 key，避免重复执行危险步骤。
-6. 实现一个“研究主题 -> 搜索 -> 阅读 -> 摘要 -> 报告”的工作流。
-7. 了解 LangGraph、Temporal、Pydantic AI Durable Execution 与 background mode 的取舍。
+当前 `ResearchWorkflow` 是一个确定性的**内存教学实现**。它真正实现 `workflow_version`、`state_version`、审批 payload hash、幂等冲突、租户/所有者边界、`waiting_for_approval`、`running`、`completed`、`cancelled` 和 `timed_out`。它没有数据库、worker、外部模型调用、外部副作用、`waiting_for_input`、`retrying`、持久化 expiry 或崩溃恢复。后几项会在本章以**生产设计练习**明确标注。
 
-本章的核心思想：越接近生产，越要把开放任务拆成可观察、可恢复的步骤。
+## 前置知识
 
-## 8.2 Workflow 与 Agent 的区别
+- 已完成第 6 章，能解释 Agent run、`RunContext`、预算停止、trace 和审批边界。
+- 理解状态机、Pydantic 不可变模型、SHA-256、数据库唯一约束与 pytest。
+- 已按 `reference-implementation/README.md` 同步环境；本章命令从 `reference-implementation/` 执行。
+
+## 学习目标
+
+完成本章后，你应该能够：
+
+1. 判断何时使用 Workflow 而不是开放 Agent loop。
+2. 准确使用当前 `WorkflowRun`、`ApprovalPayload`、`ApprovalDecision` 和 `WorkflowStatus`。
+3. 解释 `workflow_version` 与 `state_version` 的不同职责。
+4. 用 hash 把审批决定绑定到 run、tenant、workflow version、state version 和实际内容。
+5. 解释当前开始与审批幂等键的作用域、重放行为和冲突行为。
+6. 设计包含 `waiting_for_input`、`retrying`、`timed_out` 和 `cancelled` 的生产状态机。
+7. 把模型输出作为版本化快照保存，在确定 checkpoint 边界恢复，而不是重新询问模型后假装继续同一次运行。
+8. 把副作用放在可提交、可去重、可审计的边界内，并用数据库唯一约束防止并发重复执行。
+
+## 核心知识
+
+### 8.1 Workflow 与 Agent 的职责
 
 | 维度 | Workflow | Agent |
 | --- | --- | --- |
-| 步骤 | 预先定义 | 动态决定 |
-| 稳定性 | 高 | 中到低 |
-| 可审计 | 强 | 依赖 trace |
-| 灵活性 | 中 | 高 |
-| 适合 | 审批、报告、批处理、长任务 | 探索、工具选择、开放问题 |
-| 风险 | 流程设计复杂 | 循环、失控、成本高 |
+| 下一步 | 状态机允许的显式 transition | 模型在工具边界内选择 |
+| 恢复 | checkpoint + 版本化状态 | 单次 run continuation 或重开 run |
+| 等人 | 持久化 waiting 状态后释放 worker | 不应占住一次模型循环等待 |
+| 重试 | 按错误分类、attempt 和 idempotency 策略 | 容易重放未知副作用 |
+| 审计 | state transition、actor、payload、版本 | 依赖 trace，还需外部策略约束 |
+| 适合 | 审批、发布、批处理、长任务 | 局部探索、工具选择、开放分析 |
 
-判断规则：
+推荐组合：Workflow 控制主流程，Agent 只在一个可重试或可人工复核的节点内处理开放任务，Tool 执行具体动作。
 
-- 步骤明确，优先 Workflow。
-- 失败成本高，优先 Workflow。
-- 需要人工确认，优先 Workflow。
-- 任务开放且步骤不固定，再考虑 Agent。
+### 8.2 当前可执行状态机
 
-## 8.3 推荐状态模型
-
-任务状态：
+参考实现的状态枚举只有以下五项：
 
 ```python
-from enum import StrEnum
+from agent_course.workflows import WorkflowStatus
 
 
-class WorkflowStatus(StrEnum):
-    pending = "pending"
-    running = "running"
-    waiting_for_approval = "waiting_for_approval"
-    completed = "completed"
-    failed = "failed"
-    cancelled = "cancelled"
-```
-
-步骤状态：
-
-```python
-class StepStatus(StrEnum):
-    pending = "pending"
-    running = "running"
-    completed = "completed"
-    failed = "failed"
-    skipped = "skipped"
-```
-
-每个 workflow run 至少记录：
-
-| 字段 | 说明 |
-| --- | --- |
-| `run_id` | 工作流运行 ID |
-| `workflow_name` | 工作流名称 |
-| `status` | 当前状态 |
-| `input_json` | 输入参数 |
-| `state_json` | 当前状态 |
-| `created_by` | 创建人 |
-| `created_at` | 创建时间 |
-| `updated_at` | 更新时间 |
-
-## 8.4 数据库表设计
-
-### workflow_runs
-
-```sql
-create table workflow_runs (
-  id text primary key,
-  workflow_name text not null,
-  tenant_id text not null,
-  user_id text not null,
-  status text not null,
-  input_json jsonb not null,
-  state_json jsonb not null default '{}',
-  error_code text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-```
-
-### workflow_steps
-
-```sql
-create table workflow_steps (
-  id text primary key,
-  workflow_run_id text not null references workflow_runs(id),
-  step_name text not null,
-  step_index integer not null,
-  status text not null,
-  input_json jsonb not null default '{}',
-  output_json jsonb not null default '{}',
-  error_code text,
-  latency_ms integer,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-```
-
-### approval_requests
-
-```sql
-create table approval_requests (
-  id text primary key,
-  workflow_run_id text not null references workflow_runs(id),
-  step_name text not null,
-  title text not null,
-  summary text not null,
-  risk_level text not null,
-  status text not null,
-  approved_by text,
-  approved_at timestamptz,
-  created_at timestamptz not null default now()
-);
-```
-
-## 8.5 深度研究 Workflow
-
-目标：
-
-```text
-输入一个研究主题，生成一份带来源的简版研究报告。
-```
-
-步骤：
-
-```mermaid
-flowchart TD
-    A["接收主题"] --> B["生成研究计划"]
-    B --> C["搜索资料"]
-    C --> D["阅读与摘要"]
-    D --> E["交叉验证"]
-    E --> F["生成报告大纲"]
-    F --> G["生成报告正文"]
-    G --> H["事实与引用检查"]
-    H --> I["输出报告"]
-```
-
-每一步都要有输入、输出、失败处理。
-
-| 步骤 | 输入 | 输出 | 失败处理 |
-| --- | --- | --- | --- |
-| 生成研究计划 | topic | search_queries | 计划为空则失败 |
-| 搜索资料 | search_queries | sources | 搜索失败可重试 |
-| 阅读与摘要 | sources | notes | 单源失败可跳过 |
-| 交叉验证 | notes | verified_facts | 冲突事实要标记 |
-| 生成大纲 | verified_facts | outline | 大纲为空则失败 |
-| 生成正文 | outline | draft | 输出过长则分段 |
-| 引用检查 | draft + sources | report | 引用缺失则退回 |
-
-## 8.6 LangGraph 适用点
-
-LangGraph 适合：
-
-- 多节点图。
-- 条件分支。
-- 可恢复执行。
-- human-in-the-loop。
-- 长任务状态持久化。
-
-本章可以先用普通 Python 函数组合实现，等流程稳定后再迁移 LangGraph。
-
-迁移判断：
-
-| 情况 | 是否需要 LangGraph |
-| --- | --- |
-| 只有 3 个线性步骤 | 不需要 |
-| 有多个分支和回退 | 可以考虑 |
-| 需要人工确认节点 | 可以考虑 |
-| 需要长时间运行和恢复 | 推荐 |
-| 多 Agent 协作图 | 推荐 |
-
-## 8.7 Durable Execution 与 Background Mode
-
-长任务最怕两类问题：
-
-- 模型、搜索、文件解析或外部 API 中途失败。
-- 服务重启、网络断开或用户关闭页面导致任务状态丢失。
-
-因此生产系统要把“长任务”拆成可恢复步骤，而不是让一次请求从头跑到尾。
-
-| 方案 | 适合场景 | 备注 |
-| --- | --- | --- |
-| 数据库状态机 | 课程 MVP、线性流程、团队想完全掌控 | 最容易理解，代码多一些 |
-| LangGraph | 多分支、human-in-the-loop、多 Agent 图 | Python Agent 编排友好 |
-| Temporal | 企业级长任务、强重试、跨服务编排 | 运维和学习成本更高 |
-| Pydantic AI Durable Execution | 类型安全 Agent + 可恢复运行时 | 适合 Pydantic AI 技术栈 |
-| Background mode | 平台侧异步长任务执行 | 适合深度研究、长报告等耗时任务 |
-
-课程建议：
-
-1. 第 8 章先做数据库状态机，理解状态和恢复。
-2. 复杂分支再引入 LangGraph。
-3. 企业长期运行任务再比较 Temporal。
-4. 如果主线选择 Pydantic AI，再评估 durable execution。
-5. 对外 API 统一返回 `run_id`，前端用任务状态展示进度。
-
-## 8.8 人工确认节点
-
-高风险步骤必须暂停并等待确认。
-
-适合人工确认：
-
-- 发送邮件。
-- 提交审批。
-- 删除文档。
-- 执行 SQL 写操作。
-- 对外发布报告。
-
-确认卡片：
-
-```json
-{
-  "title": "确认发送研究报告",
-  "summary": "将向 sales-team@example.com 发送 8 页竞品分析报告。",
-  "risk_level": "high",
-  "action": "send_email",
-  "arguments": {
-    "to": "sales-team@example.com",
-    "subject": "竞品分析报告"
-  }
+assert {status.value for status in WorkflowStatus} == {
+    "waiting_for_approval",
+    "running",
+    "completed",
+    "cancelled",
+    "timed_out",
 }
 ```
 
-用户确认前，工具不得执行。
-
-## 8.9 幂等与重试
-
-长任务一定会失败。失败不可怕，不可恢复才可怕。
-
-### 幂等 key
-
-每个可能产生副作用的步骤都要有幂等 key：
+当前 transition：
 
 ```text
-workflow_run_id + step_name + business_object_id
+start
+  -> waiting_for_approval
+       -> approve(true) -> running -> resume -> completed
+       -> approve(false) -> cancelled
+       -> cancel -> cancelled
+       -> deadline materialized by approve/resume/cancel -> timed_out
+
+running
+  -> resume -> completed
+  -> cancel -> cancelled
+  -> deadline materialized by resume/cancel -> timed_out
+
+completed / cancelled / timed_out
+  -> resume or cancel returns the same terminal run
 ```
 
-例如：
+`resume()` 在 `waiting_for_approval` 时原样返回，不会越过审批。终态重复 resume/cancel 也是幂等读取，不增加 `state_version`。
 
-```text
-run_001:send_email:report_001
-```
+### 8.3 Run 与审批合同
 
-### 重试策略
+`WorkflowRun` 当前字段：
 
-| 错误 | 是否重试 |
+| 字段 | 语义 |
 | --- | --- |
-| 网络超时 | 可以 |
-| 限流 | 可以，退避 |
-| 参数错误 | 不重试 |
-| 权限不足 | 不重试 |
-| 人工拒绝 | 不重试 |
+| `run_id` | 从 tenant/user/request 的 SHA-256 派生的稳定 ID |
+| `workflow_version` | 当前固定为 `research-v1` |
+| `state_version` | 每次实际状态更新加 1，从 1 开始 |
+| `status` | 当前五状态之一 |
+| `tenant_id`、`user_id` | run 所属身份边界 |
+| `topic` | 规范化的业务输入 |
+| `approval` | 等待审批时的内容绑定 payload |
+| `approved_by`、`cancelled_by` | transition actor |
+| `report` | 完成后的确定性报告 |
+| `error_code` | 当前超时为 `WORKFLOW_TIMEOUT` |
 
-## 8.10 Workflow 与 Agent 的结合
+`ApprovalPayload` 包含 `run_id`、`tenant_id`、`workflow_version`、`state_version`、`action`、`topic`、`summary` 和 64 位十六进制 `content_hash`。hash 使用键排序、紧凑 JSON，并覆盖前述所有业务字段。因此：
 
-推荐方式：
+- 同一 topic 的不同 run 得到不同 hash；
+- 旧 state/version 的审批不能批准新内容；
+- 决策 hash 不等于已保存 payload hash 时，在改变状态前抛出 `ApprovalPayloadMismatchError`。
 
-```text
-Workflow 控制主流程
-Agent 处理局部开放任务
-Tool 执行具体动作
+`ApprovalDecision` 只含 `approved`、`payload_hash` 和非空 `idempotency_key`。审批 actor 由可信 `RunContext.user_id` 提供，不能由请求 body 自报。
+
+### 8.4 可恢复审批示例
+
+下面示例与当前接口和状态完全一致：
+
+```python
+from agent_course.core import RunContext
+from agent_course.workflows import (
+    ApprovalDecision,
+    ResearchWorkflow,
+    WorkflowStatus,
+)
+
+
+context = RunContext(
+    user_id="user-1",
+    tenant_id="tenant-1",
+    request_id="chapter-08-demo",
+    permissions=frozenset({"research:run", "research:approve"}),
+)
+workflow = ResearchWorkflow(timeout_seconds=300)
+
+waiting = workflow.start("AI safety", context)
+assert waiting.status is WorkflowStatus.WAITING_FOR_APPROVAL
+assert waiting.workflow_version == "research-v1"
+assert waiting.state_version == 1
+assert workflow.resume(waiting.run_id, context) == waiting
+
+approved = workflow.approve(
+    waiting.run_id,
+    ApprovalDecision(
+        approved=True,
+        payload_hash=waiting.approval.content_hash,
+        idempotency_key="approval-chapter-08-demo",
+    ),
+    context,
+)
+assert approved.status is WorkflowStatus.RUNNING
+assert approved.state_version == 2
+
+completed = workflow.resume(waiting.run_id, context)
+assert completed.status is WorkflowStatus.COMPLETED
+assert completed.state_version == 3
+assert completed.report == "Research report: AI safety."
+assert workflow.resume(waiting.run_id, context) == completed
 ```
 
-例子：
+这段“可恢复”指状态保存在同一个 `ResearchWorkflow` 实例中，调用方可以在审批后再次 `resume()`；它不意味着进程重启后仍能恢复。真正的 durable storage 是后面的生产设计练习。
 
-- Workflow 决定“搜索 -> 阅读 -> 总结 -> 审核 -> 输出”。
-- Agent 在“搜索资料”步骤里选择搜索关键词。
-- Tool 执行搜索 API。
-- Workflow 保存结果并进入下一步。
+### 8.5 权限、租户与所有者边界
 
-这样既保留 Agent 灵活性，又保证主流程可控。
+当前权限矩阵：
 
-## 8.11 测试场景
+| 操作 | 权限 | tenant 检查 | owner 检查 |
+| --- | --- | --- | --- |
+| `start` | `research:run` | 来自 context | 创建者即 owner |
+| `get` | `research:run` | 是 | 是 |
+| `resume` | `research:run` | 是 | 是 |
+| `cancel` | `research:run` | 是 | 是 |
+| `approve` | `research:approve` | 是 | 否 |
 
-至少准备：
+`approve` 不要求 approver 是 run owner，这是有意支持同租户独立审批者；`approved_by` 记录实际 approver。生产实现还应验证审批者角色、职责分离和 action 级 policy。跨租户审批永远拒绝。
 
-| 场景 | 预期 |
-| --- | --- |
-| 正常研究主题 | 完成报告 |
-| 搜索无结果 | 返回资料不足 |
-| 某个来源读取失败 | 跳过并记录 |
-| 事实冲突 | 报告中标记冲突 |
-| 输出过长 | 分段生成 |
-| 人工确认拒绝 | 停止在 cancelled |
-| 重复提交 | 幂等返回同一 run |
-| 工具超时 | 重试后失败 |
+### 8.6 当前幂等语义
 
-## 8.12 MVP / 进阶 / 生产化验收
+开始幂等键不是单独参数，而是：
 
-### MVP
+```text
+(tenant_id, user_id, request_id)
+```
 
-- 有一个线性研究 Workflow。
-- 每步有状态记录。
-- 支持失败后查看失败步骤。
-- 能生成带引用的简版报告。
+同一键加相同规范化 topic 返回原 run；同一键换 topic 抛出 `IdempotencyConflictError`。
 
-### 进阶
+审批幂等键是：
 
-- 支持人工确认节点。
-- 支持有限重试。
-- 支持幂等 key。
-- 支持从失败步骤恢复。
+```text
+(tenant_id, decision.idempotency_key)
+```
 
-### 生产化
+保存的 fingerprint 为 `(run_id, approved, payload_hash)`。同一 key 和 fingerprint 返回当前 run；同一 key 换任何内容都冲突。检查顺序还保证 hash 不匹配不会写入 idempotency 记录，也不会改变 run。
 
-- 使用 LangGraph 或 Temporal 管理复杂流程。
-- 支持任务队列和异步 worker。
-- 支持步骤级权限和审计。
-- 支持 Workflow 版本管理。
-- 支持运行中取消和超时回收。
-- 支持 durable execution 或同等的 checkpoint 恢复能力。
+当前字典只在单进程内提供这些语义。并发、多 worker 和进程重启需要数据库唯一约束。
 
-## 8.13 常见误区
+### 8.7 Timeout、cancel 与 expiry
 
-- 所有复杂任务都交给 Agent 自己规划。
-- 长任务不保存中间状态。
-- 工具失败后从头重跑。
-- 没有幂等设计。
-- 人工确认只是前端弹窗，后端没有强制检查。
-- Workflow 版本变更后无法解释历史任务。
-- 把 background mode 当作可靠性本身，而不设计自己的状态表和审计表。
+`ResearchWorkflow` 接收正数 `timeout_seconds` 和可注入的 monotonic clock。`start()` 保存内部 deadline。每次 `approve()`、`resume()` 或 `cancel()` 先 materialize timeout：若当前时间达到 deadline，run 变为 `timed_out`、`error_code="WORKFLOW_TIMEOUT"`，并增加 state version。
 
-## 8.14 本章学习资料
+当前审批 payload 没有 `expires_at` 字段，deadline 也没有持久化进 `WorkflowRun`。因此只能准确说“当前内存 run 有统一 deadline，迟到审批会先转成 timed_out”，不能说“审批请求已持久化 expiry”。
 
-- [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview)
-- [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
-- [OpenAI Agents SDK - Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
-- [OpenAI Agents SDK - Guardrails](https://openai.github.io/openai-agents-python/guardrails/)
-- [OpenAI Background Mode](https://developers.openai.com/api/docs/guides/background)
-- [Pydantic AI Durable Execution](https://pydantic.dev/docs/ai/integrations/durable_execution/overview/)
+**生产设计练习：审批 expiry。** 在 approval row 中保存 `expires_at`，审批 transaction 同时检查：row 未使用、未撤销、`now() < expires_at`、payload hash 和 state version 仍匹配。过期 transition 写审计事件并进入 `timed_out` 或重新申请审批，不能静默刷新旧 hash。
+
+### 8.8 生产状态词汇设计练习
+
+**下面是目标状态模型，不是当前枚举。** 在五个已实现状态之外加入：
+
+| 状态 | 进入条件 | 允许离开方式 |
+| --- | --- | --- |
+| `waiting_for_input` | 缺少用户业务输入，但不是风险审批 | 提交带 schema/version 的输入后回到 runnable 状态；过期可 timed out |
+| `retrying` | 可重试错误已记录，下一次 attempt 尚未到期 | backoff 到期后进入 running；预算耗尽进入 failed/terminal policy |
+| `timed_out` | run 或等待期限已到 | 终态；需要新 run 或显式补偿流程 |
+| `cancelled` | owner/策略/审批拒绝取消 | 终态；已发生副作用走补偿，不倒写历史 |
+
+不要把 `waiting_for_input` 和 `waiting_for_approval` 合并：前者收集任务数据，后者授予特定副作用权限。不要把 `retrying` 当作 sleep 中的 worker；应保存 `attempt_count`、`next_attempt_at`、`last_error_code` 后释放 worker。
+
+完整生产枚举可以包含：
+
+```text
+waiting_for_input
+waiting_for_approval
+running
+retrying
+completed
+cancelled
+timed_out
+```
+
+若产品还需要 `failed`，必须定义它和 `timed_out`、重试耗尽之间的精确关系；当前参考实现没有 `failed` workflow 状态。
+
+### 8.9 生产唯一约束设计练习
+
+**以下 SQL 是设计练习，不是已有迁移。** 数据库必须成为并发幂等的裁决者：
+
+```sql
+create table workflow_runs (
+  run_id text primary key,
+  tenant_id text not null,
+  user_id text not null,
+  request_id text not null,
+  workflow_version text not null,
+  state_version integer not null check (state_version > 0),
+  status text not null,
+  input_hash text not null,
+  state_json jsonb not null,
+  unique (tenant_id, user_id, request_id)
+);
+
+create table approval_decisions (
+  tenant_id text not null,
+  idempotency_key text not null,
+  run_id text not null references workflow_runs(run_id),
+  payload_hash text not null,
+  approved boolean not null,
+  approved_by text not null,
+  decided_at timestamptz not null,
+  primary key (tenant_id, idempotency_key)
+);
+
+create table side_effect_commits (
+  tenant_id text not null,
+  run_id text not null references workflow_runs(run_id),
+  step_name text not null,
+  business_object_id text not null,
+  request_hash text not null,
+  status text not null check (status in ('pending', 'committed', 'uncertain')),
+  response_snapshot jsonb,
+  primary key (tenant_id, run_id, step_name, business_object_id)
+);
+```
+
+应用使用 insert-on-conflict 后读取既有 row，并比较 hash。不能先 `select` 再无约束 insert，否则并发 worker 仍可能重复发送。
+
+### 8.10 确定性恢复边界与模型快照
+
+Workflow 的 checkpoint 应放在业务语义稳定的位置：
+
+```text
+读取已提交 state
+  -> 执行纯计算或准备请求
+  -> 验证输出 schema
+  -> 在 transaction 中保存 output snapshot + 新 state_version
+  -> transaction 成功后，后续节点才可见
+```
+
+模型调用是非确定性的外部活动。生产流程应保存：prompt/template version、model identifier、结构化输出、usage、必要的来源引用和输出 hash。恢复时读取这个 snapshot，不要默认重新调用模型；重调必须创建新的 attempt，并明确替换规则。否则同一个 `state_version` 可能对应两份不同研究计划，审批 hash 和审计都会失去意义。
+
+`workflow_version` 决定节点图和解释器版本，`state_version` 决定某个 run 已提交了几次 transition。部署新代码时，旧 run 应继续使用兼容 handler，或经过显式迁移；不能用最新代码无条件解释历史 state。
+
+### 8.11 副作用放置与提交顺序
+
+当前 `ResearchWorkflow.resume()` 只生成确定性字符串，没有外部副作用。以下是**生产设计练习**。
+
+副作用节点至少遵守：
+
+1. 在数据库读取并锁定当前 run/state version。
+2. 验证 tenant、permission、审批 hash、expiry 和允许的 transition。
+3. 用唯一 idempotency constraint 创建 `side_effect_commits` 占位。
+4. 若已有相同 request hash 且状态为 `committed`，返回已保存 response；若 hash 不同，报冲突；若状态为 `pending`/`uncertain`，先 reconciliation，不能直接重放。
+5. 调用支持 idempotency key 的外部服务。
+6. 保存响应 snapshot、审计 actor 和新 state。
+
+数据库无法与任意外部 API 做原子 commit，因此要根据服务能力选择 idempotency key、outbox/inbox、补偿动作和 reconciliation job。绝不能把“发送邮件”放在状态 commit 之前，然后在崩溃恢复时盲目重放。
+
+### 8.12 重试设计
+
+| 错误 | 是否自动重试 | 原因 |
+| --- | --- | --- |
+| 网络超时、429、短暂 5xx | 可，有限次数与退避 | 可能是暂时失败，仍需幂等 |
+| schema/参数错误 | 否 | 相同输入不会自愈 |
+| permission/policy denial | 否 | 重试不能创造权限 |
+| approval mismatch/expiry | 否 | 必须重新展示并取得新审批 |
+| 未知副作用结果 | 不直接重放 | 先向外部系统 reconciliation |
+
+每次 retry 保存 attempt number、错误分类、下一次时间和输入 hash。总 deadline 和 retry budget 都要有上限，防止 denial-of-wallet。
+
+## 教师演示
+
+1. 运行 8.4 示例，展示 state version 1 -> 2 -> 3。
+2. 在审批前调用 `resume()`，证明不会越过 `waiting_for_approval`。
+3. 用第一条 run 的 hash 审批同 topic 的第二条 run，展示 mismatch 且状态不变。
+4. 重放相同 approval key 与内容，展示幂等返回；改变 `approved`，展示冲突。
+5. 注入手动 clock，在 deadline 之后 approve/cancel，展示先 materialize `timed_out`。
+6. 对照生产状态图，指出 `waiting_for_input`、`retrying` 和数据库 constraints 尚未由参考实现提供。
+
+## 学员实验
+
+Task 11 计划创建本章实验目录 `labs/chapter-08/`；该目录在本次 Task 5 提交中尚未创建，因此不把它写成当前可点击链接，也不宣称已有可运行 lab README。
+
+实验任务：
+
+1. 完成 start -> waiting -> approve -> running -> resume -> completed。
+2. 验证拒绝审批进入 `cancelled`，owner cancel 幂等。
+3. 验证 payload hash 不能跨 run 重放，idempotency key 冲突不改变 state。
+4. 验证 permission、tenant、owner 和独立 approver 边界。
+5. 用 injected clock 验证 waiting/running run 的 timeout。
+6. 设计包含 `waiting_for_input` 和 `retrying` 的扩展状态图。
+7. 提交数据库唯一约束、模型输出 snapshot 和副作用 placement 说明。
+
+默认离线验证命令：
+
+```bash
+cd reference-implementation
+uv run --group dev --extra live pytest -q
+```
+
+本章聚焦命令：
+
+```bash
+uv run --group dev --extra live pytest tests/test_workflow.py -q
+```
+
+## 失败注入与排错
+
+| 注入 | 预期 | 关键证据 |
+| --- | --- | --- |
+| 旧 run hash 审批新 run | `ApprovalPayloadMismatchError` | 新 run state 不变 |
+| 同一 start key 换 topic | `IdempotencyConflictError` | 原 run 仍可读取 |
+| 同一 approval key 换 decision | `IdempotencyConflictError` | 无第二次 transition |
+| 非 owner resume/cancel | `WorkflowAccessError` | tenant/owner 检查顺序 |
+| 同 tenant approver 非 owner | 有 `research:approve` 时可审批 | `approved_by` 是实际 approver |
+| deadline 后 approve | `timed_out`，未写 `approved_by` | timeout 先 materialize |
+| completed 后 resume | 返回同一 run | state version 不增加 |
+
+排错按 `run_id`、`workflow_version`、`state_version`、status、actor context、approval hash、idempotency fingerprint 和 deadline 顺序检查。不要只看最终 report。
+
+## 自动验证
+
+当前 `tests/test_workflow.py` 已验证：版本化初始状态、内容绑定 hash、跨 run 重放拒绝、mismatch 无状态变更、审批后恢复、开始与审批幂等冲突、permission/tenant/owner、waiting/running timeout，以及 cancel 幂等。
+
+文档验收还应确认：
+
+- 当前五个状态与测试一致；
+- `waiting_for_input` 和 `retrying` 明确标为设计练习；
+- 没有声称 payload 当前包含 `expires_at`；
+- SQL 有真实 unique/primary key 约束；
+- 模型输出 snapshot 和副作用 placement 有确定 commit 边界；
+- Python fence 可解析，计划 lab 路径不形成失效链接。
+
+## 作业与评分
+
+| 维度 | 分值 | 满分证据 |
+| --- | ---: | --- |
+| 当前状态机 | 20 | transition、终态和 state version 与实现一致 |
+| 审批安全 | 20 | payload hash 覆盖 run/tenant/version/state/content，expiry 设计明确 |
+| 幂等与并发 | 20 | 当前 key 语义准确，生产数据库有唯一约束与冲突比较 |
+| 恢复与快照 | 15 | checkpoint 确定，模型输出版本化，不隐式重调 |
+| 副作用 | 15 | placement、外部 idempotency、outbox/reconciliation 合理 |
+| 身份与超时 | 10 | permission/tenant/owner/approver 和 timeout 边界有测试 |
+
+只在前端显示确认弹窗、后端不校验 payload hash 的提交，审批安全项不得分。只在 Python 中查询“是否执行过”却没有数据库唯一约束的生产设计，幂等与并发项不得满分。
+
+## Core / Advanced / Production 完成标准
+
+- **Core**：当前内存 Workflow 的 start、approval、resume、cancel、timeout、版本和边界测试全部通过。
+- **Advanced**：能设计并测试 `waiting_for_input`、`retrying`、attempt budget、snapshot 和 deterministic resume boundary。
+- **Production（设计与外部基础设施要求）**：持久化数据库、并发唯一约束、worker、审批 expiry、外部副作用幂等/outbox、补偿和版本迁移均已实现并演练崩溃恢复。当前参考实现不宣称达到这一层。
+
+## 本章资料
+
+- [参考实现 README](../reference-implementation/README.md)
+- [LangGraph Durable Execution](https://docs.langchain.com/oss/python/langgraph/durable-execution)
 - [Temporal Documentation](https://docs.temporal.io/)
+- [Pydantic AI Durable Execution](https://ai.pydantic.dev/durable_execution/)
+- [OpenAI Background Mode](https://developers.openai.com/api/docs/guides/background)
+- [OpenAI Agents SDK - Human-in-the-loop](https://openai.github.io/openai-agents-python/human_in_the_loop/)
+- [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 
-## 8.15 本章复盘模板
+## 复盘模板
 
 ```markdown
 # 第 8 章复盘
 
-## 我的 Workflow 包含哪些步骤
+## 当前实现有哪些状态和 transition
 
-## 每一步的输入输出是什么
+## workflow_version 与 state_version 分别保护什么
 
-## 哪些步骤可以失败并重试
+## 审批 hash 绑定了哪些字段，何时过期
 
-## 哪些步骤需要人工确认
+## 开始、审批和副作用各自的幂等键是什么
 
-## 我的状态表如何设计
+## 模型输出在哪个 checkpoint 保存，恢复时是否重调
 
-## 我的幂等 key 是什么
+## waiting_for_input 与 waiting_for_approval 有何不同
 
-## 哪些局部任务交给 Agent
+## 副作用发生前后分别提交什么
 
-## 哪些主流程必须由 Workflow 控制
+## 哪些能力仍只是生产设计练习
 ```

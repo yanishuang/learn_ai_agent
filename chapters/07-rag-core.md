@@ -1,490 +1,407 @@
 # 第 7 章：RAG 核心：从文档到可信答案
 
-更新时间：2026-07-09
+更新时间：2026-07-10
 建议学习时间：7-10 天  
-适合阶段：已经能完成模型调用、Prompt 管理和 Tool Calling，准备构建企业知识库问答 MVP  
-本章产出：一个可运行的基础 RAG 服务，支持文档上传、解析、切片、向量化、检索、生成答案和引用溯源
+本章产出：一个确定性、权限感知、能拒答并返回真实引用的离线 RAG；以及一份可迁移到 PostgreSQL/pgvector 的版本化数据与授权查询设计。
 
-## 7.1 本章学习目标
+## 本章定位
 
-学完本章后，你应该能做到：
+RAG 不是“把向量查出来再塞给模型”，而是一条可检查的数据链：来源解析、版本化、切片、索引、授权过滤、相关性排序、上下文组装、回答和引用。任何一环缺少身份、版本或来源，答案就难以复现。
 
-1. 解释 RAG 的完整链路：加载、解析、切片、向量化、索引、检索、组装上下文、生成答案、返回引用。
-2. 用 Python 实现最小 RAG 管线，而不是只调用现成框架。
-3. 使用 PostgreSQL + pgvector 保存文档、切片和向量。
-4. 为回答返回引用来源，避免模型自由编造出处。
-5. 建立最小 RAG 测试集，判断“能回答”是否真的来自检索材料。
-6. 知道哪些问题是核心 RAG 无法解决的，需要第 11 章高级 RAG。
+参考实现的主线刻意保持离线和确定性：`InMemoryRetriever` 使用规范化 token overlap，不调用 embedding 服务，不要求 PostgreSQL，也不调用生成模型。它已经实现租户、用户 allowlist 和权限集合过滤、阈值、稳定排序、拒答与引用。PostgreSQL/pgvector、完整摄取元数据、HNSW/IVFFlat 和用户访问表属于本章的**生产数据模型设计练习**，不是当前可执行实现。
 
-本章的核心不是“接一个向量库”，而是建立可检查的数据链路。
+## 前置知识
 
-## 7.2 本章 MVP 范围
+- 已完成第 3 章的上下文来源与间接提示词注入威胁模型。
+- 已完成第 4-6 章，理解 Pydantic 边界对象、`RunContext`、工具权限和确定性测试。
+- 能阅读基本 SQL、pytest 和排名指标。
+- 已按 `reference-implementation/README.md` 同步环境；本章命令从 `reference-implementation/` 执行。
 
-先做一个窄而完整的系统：
+## 学习目标
 
-| 能力 | 本章要求 | 暂不要求 |
-| --- | --- | --- |
-| 文档格式 | Markdown、TXT、PDF | 复杂扫描 PDF、图片 OCR |
-| 切片 | 按标题/段落 + token 长度兜底 | 父子切片、表格语义恢复 |
-| 检索 | 向量 Top-K + 元数据过滤 | 混合检索、rerank |
-| 生成 | 基于检索片段回答 | 多轮 Agent 自主检索 |
-| 引用 | 返回 chunk 来源 | 引用精确到页码/单元格 |
-| 权限 | 文档级权限字段 | 完整租户 RBAC |
-| 评估 | 10-20 条手工测试集 | 自动化多指标评估平台 |
+完成本章后，你应该能够：
 
-MVP 做小一点，才能把链路做扎实。
+1. 解释摄取、切片、索引、授权检索、回答与引用的完整链路。
+2. 使用当前 `DocumentChunk`、`RetrievalHit`、`RagCitation` 和 `RagAnswer` 合同。
+3. 在相关性计算之前执行租户、用户 allowlist 和 trusted permission 过滤。
+4. 设计包含 `document_version`、`content_hash`、`embedding_model`、`embedding_dimensions`、`chunker_version`、`page_number`、`source_offset` 和 `access_scope` 的生产数据模型。
+5. 在 SQL 检索查询本身加入租户和用户访问条件，而不是先取回越权候选再在 Python 中过滤。
+6. 比较 HNSW 与 IVFFlat 的构建、内存、查询、调参和过滤权衡。
+7. 从检索 hit 构造真实 quote，并在授权资料不足时稳定拒答。
+8. 用确定性 case 回归检索、引用和租户隔离。
 
-## 7.3 推荐架构
+## 核心知识
 
-```mermaid
-flowchart LR
-    Upload["文档上传"] --> Parser["文档解析"]
-    Parser --> Chunker["切片"]
-    Chunker --> Embedder["Embedding"]
-    Embedder --> Store["PostgreSQL + pgvector"]
-    Question["用户问题"] --> Retriever["向量检索"]
-    Store --> Retriever
-    Retriever --> Context["上下文组装"]
-    Context --> Generator["模型生成"]
-    Generator --> Answer["答案 + 引用"]
-    Retriever --> Eval["检索/回答日志"]
+### 7.1 可执行 RAG 合同
+
+当前参考实现的 `DocumentChunk` 字段必须原样理解：
+
+| 字段 | 当前语义 |
+| --- | --- |
+| `chunk_id` | 片段 ID，非空 |
+| `document_id` | 来源文档 ID，非空 |
+| `tenant_id` | 强制租户边界，非空 |
+| `title` | 可展示来源标题，非空 |
+| `content` | 检索和 quote 的原始片段，非空 |
+| `allowed_user_ids` | `None` 表示不做用户 allowlist；集合表示只允许列出的用户 |
+| `required_permissions` | chunk 所需权限集合，必须是 `RunContext.permissions` 的子集 |
+
+返回对象为：
+
+- `RetrievalHit(chunk_id, document_id, title, content, score, citation)`，其中 `score` 在 0 到 1 之间。
+- `RagCitation(citation_id, document_id, chunk_id, title, quote)`，`citation_id` 从 1 开始。
+- `RagAnswer(answer, citations=(), refused=False)`。
+
+当前回答对象没有 `confidence`、`missing_info`、page number 或 URI。不要在示例 API 中声称这些字段已经存在。
+
+### 7.2 授权必须先于相关性
+
+`InMemoryRetriever.search(query, context, top_k)` 的执行顺序是：
+
+1. 要求 `top_k > 0`。
+2. 对每个 chunk 先检查 `tenant_id`。
+3. 再检查 `allowed_user_ids`。
+4. 再检查 `required_permissions <= context.permissions`。
+5. 只有可见 chunk 才计算 token overlap 和最低匹配词数。
+6. 按 `(-score, document_id, chunk_id)` 稳定排序，最后截取 `top_k`。
+
+这个顺序同时是安全边界和评估边界。若先对全库做 top-k，再从结果中删掉越权项，至少有四个问题：候选数量和时序会泄露信息、授权结果可能不足 top-k、索引/缓存可能记录越权内容、评分与线上行为不一致。
+
+### 7.3 离线检索与拒答
+
+下面示例与参考实现完全一致：
+
+```python
+from agent_course.core import RunContext
+from agent_course.rag import DocumentChunk, InMemoryRetriever
+
+
+context = RunContext(
+    user_id="user-1",
+    tenant_id="tenant-1",
+    request_id="chapter-07-demo",
+    permissions=frozenset({"knowledge:read"}),
+)
+retriever = InMemoryRetriever(
+    [
+        DocumentChunk(
+            chunk_id="hr-leave",
+            document_id="hr-policy",
+            tenant_id="tenant-1",
+            title="HR Policy - Annual Leave",
+            content="Employees receive 15 days of paid annual leave each year.",
+            required_permissions=frozenset({"knowledge:read"}),
+        ),
+        DocumentChunk(
+            chunk_id="other-tenant",
+            document_id="private-plan",
+            tenant_id="tenant-2",
+            title="Private Plan",
+            content="Employees receive 30 days of paid annual leave each year.",
+        ),
+    ]
+)
+
+answer = retriever.answer("paid annual leave days", context, top_k=3)
+
+assert answer.refused is False
+assert answer.answer == (
+    "Employees receive 15 days of paid annual leave each year. [1]"
+)
+assert answer.citations[0].document_id == "hr-policy"
+assert answer.citations[0].quote in retriever.search(
+    "paid annual leave days", context, top_k=3
+)[0].content
 ```
 
-关键原则：
-
-- 文档解析、切片、检索、生成要能分别测试。
-- 引用必须来自检索结果，不允许模型自行生成来源。
-- 权限过滤必须发生在检索前或检索时，不是生成后再遮盖。
-- 每次回答都要保存检索结果，便于回放和评估。
-
-## 7.4 推荐项目结构
+评分是 `query token` 被内容覆盖的比例。默认 `min_score=0.5`，并要求至少匹配 `min(2, query token 数)` 个词，防止“leave password”只因一个词重合就错误回答。没有授权且足够相关的 hit 时，`answer()` 返回：
 
 ```text
-app/
-  api/
-    rag_routes.py
-  rag/
-    schemas.py
-    loaders.py
-    chunker.py
-    embeddings.py
-    repository.py
-    retriever.py
-    generator.py
-    service.py
-  prompts/
-    knowledge_qa.md
-  observability/
-    logging.py
-tests/
-  rag/
-    test_chunker.py
-    test_retriever.py
-    test_generator.py
-evals/
-  rag_cases.jsonl
+根据当前资料无法确认。
 ```
 
-每个文件职责：
+同时 `refused=True`、`citations=()`。这是一条确定性拒答合同，不是模型自报低置信度。
 
-| 文件 | 职责 |
-| --- | --- |
-| `loaders.py` | 把文件解析成文本和元数据 |
-| `chunker.py` | 把文本切成可检索片段 |
-| `embeddings.py` | 调用 embedding 模型 |
-| `repository.py` | 读写 documents、chunks、runs |
-| `retriever.py` | 根据问题检索相关 chunks |
-| `generator.py` | 组装 prompt 并生成答案 |
-| `service.py` | 串联上传、索引、问答流程 |
+### 7.4 来源与引用
 
-## 7.5 数据库表设计
+引用必须由检索层从真实 hit 构造：
 
-### documents
+1. `_best_quote()` 把 chunk 按句界切分。
+2. 选择 query overlap 最高的句子；并列时保留较早句子。
+3. 后端分配连续 `citation_id`。
+4. 回答中的 `[1]` 对应返回的第一个 `RagCitation`。
+
+最小不变量：
+
+```python
+def citation_is_grounded(hit_content: str, quote: str) -> bool:
+    return bool(quote) and quote in hit_content
+```
+
+生产系统还应验证 document/version 可读取、引用区间对应原始来源、页面或 offset 没有跨版本漂移。模型可以组织回答，不能自己发明 citation ID、文档标题或 quote。
+
+### 7.5 生产数据模型设计练习
+
+**以下 SQL 是设计练习，不是参考实现已经创建的表。** `reference-implementation/compose.yaml` 只提供可选 PostgreSQL/pgvector 服务，默认测试不会启动它，也没有迁移脚本。
+
+版本化文档表：
 
 ```sql
 create table documents (
-  id text primary key,
+  id text not null,
   tenant_id text not null,
+  document_version integer not null check (document_version > 0),
+  content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
   title text not null,
-  source_type text not null,
-  storage_uri text,
-  metadata_json jsonb not null default '{}',
-  status text not null,
+  source_uri text,
+  access_scope text not null check (access_scope in ('tenant', 'users')),
+  allowed_user_ids text[] not null default '{}',
   created_by text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  primary key (tenant_id, id, document_version),
+  unique (tenant_id, id, content_hash)
 );
 ```
 
-### document_chunks
+版本化 chunk 与 embedding 表：
 
 ```sql
 create extension if not exists vector;
 
 create table document_chunks (
   id text primary key,
-  document_id text not null references documents(id),
+  document_id text not null,
   tenant_id text not null,
-  chunk_index integer not null,
-  title_path text,
+  document_version integer not null check (document_version > 0),
+  content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
+  embedding_model text not null,
+  embedding_dimensions integer not null check (embedding_dimensions = 1536),
+  chunker_version text not null,
+  chunk_index integer not null check (chunk_index >= 0),
+  page_number integer check (page_number > 0),
+  source_offset integer not null check (source_offset >= 0),
+  access_scope text not null check (access_scope in ('tenant', 'users')),
+  allowed_user_ids text[] not null default '{}',
+  required_permissions text[] not null default '{}',
+  title text not null,
   content text not null,
-  token_count integer not null,
-  metadata_json jsonb not null default '{}',
-  embedding vector(1536),
-  created_at timestamptz not null default now()
-);
-
-create index document_chunks_embedding_idx
-on document_chunks using ivfflat (embedding vector_cosine_ops);
-
-create index document_chunks_tenant_idx
-on document_chunks (tenant_id);
-```
-
-向量维度必须和 embedding 模型一致。模型更换时，要记录 embedding 模型版本并重新索引。
-
-### rag_runs
-
-```sql
-create table rag_runs (
-  id text primary key,
-  tenant_id text not null,
-  user_id text not null,
-  question text not null,
-  answer text,
-  status text not null,
-  model text not null,
-  latency_ms integer,
-  error_code text,
-  created_at timestamptz not null default now()
+  embedding vector(1536) not null,
+  foreign key (tenant_id, document_id, document_version)
+    references documents (tenant_id, id, document_version),
+  unique (
+    tenant_id,
+    document_id,
+    document_version,
+    chunker_version,
+    chunk_index,
+    embedding_model
+  )
 );
 ```
 
-### retrieval_hits
+这些字段解决的问题不同：
 
-```sql
-create table retrieval_hits (
-  id text primary key,
-  rag_run_id text not null references rag_runs(id),
-  chunk_id text not null references document_chunks(id),
-  rank integer not null,
-  score double precision not null,
-  content_preview text not null,
-  created_at timestamptz not null default now()
-);
-```
+| 字段 | 必须回答的问题 |
+| --- | --- |
+| `document_version` | hit 来自文档的哪一版，更新后能否回放旧答案 |
+| `content_hash` | 内容是否真的变化，摄取能否幂等去重 |
+| `embedding_model` | 哪个模型生成向量，能否安全比较 query/document 向量 |
+| `embedding_dimensions` | 存储维度与模型输出是否一致 |
+| `chunker_version` | 切片算法变更后如何重建并比较 |
+| `page_number` | 可分页来源的显示定位；非分页来源可为 `NULL` |
+| `source_offset` | chunk 在规范化源文本中的起点，用于精确追溯 |
+| `access_scope` | 是租户内可见还是仅指定用户可见 |
 
-## 7.6 文档解析
+同一 vector 列的维度是 schema 级约束。若更换为不同维度，应该创建新的列/表/分区并重建索引，不能只改 `embedding_dimensions` 元数据后继续混算。
 
-先支持三类格式：
+### 7.6 授权条件必须写进 SQL
 
-| 格式 | 推荐库 | 注意点 |
-| --- | --- | --- |
-| Markdown / TXT | 标准库 | 保留标题结构 |
-| PDF | `pypdf` | 扫描件效果差，需要 OCR 才能处理 |
-| Word | `python-docx` | 标题、表格、段落要分开处理 |
-
-解析结果统一为：
-
-```python
-from pydantic import BaseModel, Field
-
-
-class ParsedDocument(BaseModel):
-    title: str
-    text: str
-    metadata: dict[str, str] = Field(default_factory=dict)
-```
-
-本章不要追求“解析所有格式”。先保证解析后的文本可检查、可切片、可追踪来源。
-
-## 7.7 切片策略
-
-基础切片推荐：
-
-1. 按 Markdown 标题分段。
-2. 标题段落过长时按段落继续切。
-3. 单段仍过长时按 token 或字符长度兜底。
-4. 每个 chunk 保留 `title_path`、`document_id`、`chunk_index`。
-
-切片对象：
-
-```python
-from pydantic import BaseModel, Field
-
-
-class DocumentChunk(BaseModel):
-    document_id: str
-    chunk_index: int
-    title_path: str | None = None
-    content: str
-    token_count: int
-    metadata: dict[str, str] = Field(default_factory=dict)
-```
-
-切片验收：
-
-- chunk 不应过长，避免塞满上下文。
-- chunk 不应过短，避免失去语义。
-- 同一标题下的上下文关系要尽量保留。
-- 每个 chunk 能追溯回原文档。
-
-## 7.8 Embedding 与索引
-
-Embedding 层负责把 chunk 转成向量。
-
-注意事项：
-
-- 记录 embedding 模型名称和维度。
-- 批量生成 embedding，避免逐条请求导致慢和贵。
-- 失败时可重试，但不能重复插入 chunk。
-- 文档更新后要能重新索引。
-
-推荐状态流转：
-
-```text
-uploaded -> parsing -> chunking -> embedding -> indexed -> failed
-```
-
-如果文档状态不是 `indexed`，问答时不应该检索它。
-
-## 7.9 检索器
-
-基础检索只做向量 Top-K：
+**以下仍是生产设计练习。** 查询同时带入认证层提供的 `tenant_id`、`user_id` 和 permission 数组；这些参数不能来自模型生成的 tool arguments。
 
 ```sql
 select
   id,
   document_id,
-  title_path,
+  document_version,
+  title,
   content,
+  page_number,
+  source_offset,
   1 - (embedding <=> :query_embedding) as score
 from document_chunks
 where tenant_id = :tenant_id
+  and embedding_model = :embedding_model
+  and embedding_dimensions = :embedding_dimensions
+  and (
+    access_scope = 'tenant'
+    or (
+      access_scope = 'users'
+      and :user_id = any(allowed_user_ids)
+    )
+  )
+  and required_permissions <@ :trusted_permissions::text[]
 order by embedding <=> :query_embedding
 limit :top_k;
 ```
 
-检索器必须接收：
+这里的租户、用户和权限过滤与 ANN 排序处于同一查询。应用层仍需做输入校验和结果授权断言，但不能把 SQL 过滤删除。访问规则更复杂时，可以用授权关系表和 `exists` 子查询；核心不变：不可见记录不能进入候选结果。
 
-| 参数 | 说明 |
-| --- | --- |
-| `tenant_id` | 租户隔离 |
-| `user_id` | 后续权限过滤使用 |
-| `query` | 用户问题 |
-| `top_k` | 返回片段数量 |
+### 7.7 HNSW 与 IVFFlat 的取舍
 
-不要先查全库再在应用层过滤权限。企业场景里，这会带来权限泄露风险。
+不要把 IVFFlat 当成通用默认值。两者都需要用真实数据量、过滤选择性、延迟目标和 recall 评估。
 
-## 7.10 上下文组装
-
-检索结果不能无脑塞进 prompt。建议格式：
-
-```text
-你是企业知识库问答助手。
-请仅基于给定资料回答用户问题。
-如果资料中没有答案，请回答“根据当前资料无法确认”。
-每个关键结论后面标注引用编号，例如 [1]。
-
-用户问题：
-{{question}}
-
-资料：
-[1] 来源：{{source_1}}
-{{content_1}}
-
-[2] 来源：{{source_2}}
-{{content_2}}
-```
-
-上下文组装规则：
-
-- 按检索分数排序。
-- 过滤低于阈值的片段。
-- 控制总 token 数。
-- 保留引用编号和来源。
-- 不把用户输入混入资料区。
-
-## 7.11 生成答案与引用
-
-输出对象：
-
-```python
-class RagCitation(BaseModel):
-    id: int
-    document_id: str
-    chunk_id: str
-    title: str
-    quote: str
-
-
-class RagAnswer(BaseModel):
-    answer: str
-    citations: list[RagCitation]
-    confidence: str
-    missing_info: str | None = None
-```
-
-引用规则：
-
-- `citations` 必须从 retrieval hits 生成。
-- `quote` 只能截取 chunk 中真实存在的文本。
-- 如果答案没有引用支撑，应该降低 confidence 或说明无法确认。
-
-## 7.12 API 设计
-
-### 上传文档
-
-```text
-POST /api/rag/documents
-```
-
-返回：
-
-```json
-{
-  "document_id": "doc_001",
-  "status": "uploaded"
-}
-```
-
-### 索引文档
-
-```text
-POST /api/rag/documents/{document_id}/index
-```
-
-返回：
-
-```json
-{
-  "document_id": "doc_001",
-  "status": "indexed",
-  "chunk_count": 42
-}
-```
-
-### 提问
-
-```text
-POST /api/rag/query
-```
-
-请求：
-
-```json
-{
-  "question": "公司的年假制度是什么？",
-  "top_k": 5
-}
-```
-
-返回：
-
-```json
-{
-  "answer": "根据资料，员工年假规则为...",
-  "citations": [
-    {
-      "id": 1,
-      "document_id": "doc_001",
-      "chunk_id": "chk_001",
-      "title": "员工休假制度",
-      "quote": "员工连续工作满一年后..."
-    }
-  ],
-  "confidence": "high",
-  "missing_info": null
-}
-```
-
-## 7.13 最小评估集
-
-从第 7 章开始就要建立评估意识。创建：
-
-```text
-evals/rag_cases.jsonl
-```
-
-每行一个用例：
-
-```json
-{"id":"case_001","question":"员工满一年后有几天年假？","expected_answer_keywords":["年假","5天"],"expected_sources":["员工休假制度"],"must_refuse":false}
-```
-
-最小指标：
-
-| 指标 | 说明 |
-| --- | --- |
-| retrieval_hit | 预期文档是否进入 Top-K |
-| answer_contains_keywords | 答案是否包含关键事实 |
-| citation_present | 是否返回引用 |
-| refusal_correct | 资料不足时是否拒答 |
-
-本章先不用追求复杂评分，先保证每次改切片、检索、prompt 后能跑同一组问题。
-
-## 7.14 MVP / 进阶 / 生产化验收
-
-### MVP
-
-- 能上传 Markdown/TXT/PDF。
-- 能解析并切片。
-- 能生成 embedding 并写入 pgvector。
-- 能基于文档回答问题。
-- 能返回引用。
-- 有 10 条评估用例。
-
-### 进阶
-
-- 支持 Word。
-- 支持文档删除和重新索引。
-- 支持按租户过滤。
-- 每次回答保存 retrieval hits。
-- 评估脚本能输出通过率。
-
-### 生产化
-
-- 文档解析异步化。
-- 支持大文件上传和失败重试。
-- 支持用户级权限过滤。
-- 支持索引版本管理。
-- 支持评估报告和回归趋势。
-
-## 7.15 常见问题
-
-| 问题 | 原因 | 处理 |
+| 维度 | HNSW | IVFFlat |
 | --- | --- | --- |
-| 检索不到 | 切片不合理、query 表达不同 | 第 11 章做查询改写和混合检索 |
-| 检索到了但答错 | prompt 没有限制、上下文太多 | 加强引用规则，压缩上下文 |
-| 引用不准确 | 引用由模型生成 | 引用由后端 retrieval hits 生成 |
-| 表格问答差 | 基础切片破坏表格语义 | 第 11 章做表格专门处理 |
-| 权限泄露 | 先检索后过滤 | 在 SQL / 检索层加入权限条件 |
+| 建索引 | 通常更慢、占内存更多 | 通常更快、结构更紧凑 |
+| 数据准备 | 不需要训练聚类中心 | 应在有代表性数据后构建 lists |
+| 查询 | 常有较好的速度/recall 平衡 | 依赖 `lists` 和查询时 `probes` 调参 |
+| 写入变化 | 支持增量，但图维护成本较高 | 数据分布变化后可能需要重建/重调 |
+| 内存 | 较高 | 通常较低 |
+| 过滤后结果 | 高选择性过滤仍可能减少有效候选，需要测 iterative scan/搜索参数 | 过滤与 probes 共同影响候选和 recall |
+| 适合起点 | recall 与低延迟更重要、内存可接受 | 数据规模较大、资源更紧、愿意做聚类与 probes 调优 |
 
-## 7.16 本章学习资料
+索引选择流程：先保留无 ANN 的精确搜索作为小数据基线；再分别测 HNSW 和 IVFFlat 的 p50/p95 延迟、recall@k、索引时间、磁盘/内存和带授权过滤后的有效 hit 数。最终选择来自数据，不来自教程习惯。
 
+### 7.8 摄取、切片与重建
+
+生产设计中的推荐状态是：
+
+```text
+uploaded -> parsing -> chunking -> embedding -> indexed
+                                      \-> failed
+```
+
+每次摄取应：
+
+1. 规范化来源并计算 `content_hash`。
+2. 若 hash 和版本策略表明未变化，幂等返回现有索引结果。
+3. 使用显式 `chunker_version` 生成 chunk，并保存 page/offset。
+4. 使用显式 `embedding_model` 和维度生成向量。
+5. 在同一发布边界把新版本标记为可检索；不要让半完成版本进入查询。
+6. 保留足够元数据回放旧 run，并按保留策略清理旧向量。
+
+参考实现没有实现这条摄取 pipeline；本章 Core 只要求理解并验证离线 retrieval 合同。
+
+### 7.9 RAG 评估起点
+
+确定性测试优先检查：
+
+| 指标/断言 | 问题 |
+| --- | --- |
+| authorization exclusion | 其他租户、其他用户、缺权限 chunk 是否完全不出现 |
+| retrieval hit | 预期 chunk 是否进入 top-k |
+| stable rank | 相同输入是否得到相同顺序 |
+| quote grounding | citation quote 是否是 hit content 的真实子串 |
+| refusal correctness | 无授权答案或相关性不足时是否拒答 |
+| answer grounding | 最终文本是否来自 top hit 并匹配 citation |
+
+Task 11 计划创建 `evals/rag-cases.jsonl`，覆盖 answerable、unanswerable、synonym、citation 和 tenant isolation。该数据集在本次 Task 5 提交中尚未创建；当前可执行证据来自 `tests/test_rag.py`。
+
+## 教师演示
+
+1. 读取 `sample-data/hr-policy.md`，证明 citation quote 是源文件中的真实句子。
+2. 同时放入高相关的跨租户 chunk、用户 allowlist chunk 和可见 chunk，展示前两者在评分前被排除。
+3. 删除 `knowledge:read`，展示需要该权限的 chunk 不参与排名。
+4. 输入 “leave password”，展示单词重合不足时稳定拒答。
+5. 用同一批数据比较精确搜索、HNSW 和 IVFFlat 的设计指标，强调这部分不是默认测试已实现的行为。
+
+## 学员实验
+
+Task 11 计划创建本章实验目录 `labs/chapter-07/`；该目录在本次 Task 5 提交中尚未创建，因此不提供失效链接，也不宣称其 README 当前可运行。
+
+实验任务：
+
+1. 为同一 query 构造可见、跨租户、错误用户和缺权限四类 chunk。
+2. 对 hit、rank、quote 和拒答写确定性断言。
+3. 在纸面/SQL 设计中补齐八个版本与来源字段。
+4. 编写带租户、用户 allowlist、trusted permissions 的单条检索 SQL。
+5. 设计 HNSW/IVFFlat 对比实验，至少记录 recall@k、p95 和索引资源。
+6. 说明为什么回答自报 `confidence="high"` 不能覆盖授权或引用断言。
+
+默认离线验证命令：
+
+```bash
+cd reference-implementation
+uv run --group dev --extra live pytest -q
+```
+
+本章聚焦命令：
+
+```bash
+uv run --group dev --extra live pytest tests/test_rag.py -q
+```
+
+## 失败注入与排错
+
+| 注入 | 预期 | 排查点 |
+| --- | --- | --- |
+| 跨租户 chunk 分数最高 | 结果仍不含该 chunk | 授权是否在评分之前 |
+| `allowed_user_ids` 不含当前用户 | chunk 不可见 | `None` 与空集合语义是否混淆 |
+| 缺少 required permission | chunk 不可见 | permission 是否来自认证层 |
+| query 只有一个误导重合词 | 拒答 | 最低分与最低匹配词数 |
+| quote 不在 content | 自动测试失败 | citation 是否由后端 hit 构造 |
+| 向量维度与模型不一致 | 索引/查询应在边界失败 | model、dimensions、索引版本是否一起校验 |
+| ANN + 高选择性授权过滤返回不足 | 不扩大权限，调搜索参数或回退 | 不得先全库 top-k 再过滤 |
+
+排错时先区分授权为空和相关性为空。两者对用户都可以安全拒答，但 trace/内部指标必须能区分，否则团队可能用降低阈值“修复”一个权限配置问题。
+
+## 自动验证
+
+当前 `tests/test_rag.py` 已验证：
+
+- 规范化 overlap 能命中真实来源 quote；
+- tenant 与 user allowlist 在评分前过滤；
+- trusted permission 不足时排除 chunk；
+- 无答案和误导性单词重合都会拒答；
+- 答案来自 top hit，citation quote 是 content 子串。
+
+本章文档验收还应确认：八个指定元数据字段全部出现；SQL 同时含 tenant 和 user access 条件；HNSW/IVFFlat 被描述为权衡；生产 schema 明确标记为设计练习；Python fence 可解析；计划 lab 路径没有写成当前失效链接。
+
+## 作业与评分
+
+| 维度 | 分值 | 满分证据 |
+| --- | ---: | --- |
+| 可执行检索合同 | 25 | 使用当前模型字段，离线 hit/拒答与测试一致 |
+| 权限边界 | 25 | tenant、user、permission 在评分/SQL 查询中生效 |
+| 来源与引用 | 15 | quote 来自实际 hit，版本定位方案完整 |
+| 数据版本设计 | 20 | 八个必需字段语义、约束和重建策略明确 |
+| 索引选择 | 10 | 用数据比较 HNSW/IVFFlat，不宣称万能默认 |
+| 解释 | 5 | 清楚区分已实现行为与设计练习 |
+
+任何先查询跨租户候选再在应用层过滤的提交，权限边界项不得分。任何由模型自由生成 quote 或来源 ID 的提交，来源与引用项不得分。
+
+## Core / Advanced / Production 完成标准
+
+- **Core**：离线 retriever 能做 tenant/user/permission 过滤、稳定排序、真实引用和正确拒答。
+- **Advanced**：建立版本化摄取、chunk 来源定位和 `evals/rag-cases.jsonl` 回归，并比较切片/检索变更。
+- **Production（设计与外部基础设施要求）**：授权过滤进入数据库查询，索引和 embedding 版本可迁移，HNSW/IVFFlat 以真实负载验证，并有审计、保留和回滚。当前内存参考实现不宣称达到这一层。
+
+## 本章资料
+
+- [参考实现 README](../reference-implementation/README.md)
 - [Retrieval-Augmented Generation Paper](https://arxiv.org/abs/2005.11401)
 - [pgvector](https://github.com/pgvector/pgvector)
+- [PostgreSQL Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
+- [OpenAI Embeddings Guide](https://developers.openai.com/api/docs/guides/embeddings)
 - [LlamaIndex Documentation](https://docs.llamaindex.ai/)
 - [Haystack Documentation](https://docs.haystack.deepset.ai/)
-- [OpenAI API Documentation](https://developers.openai.com/api/docs)
 
-## 7.17 本章复盘模板
+## 复盘模板
 
 ```markdown
 # 第 7 章复盘
 
-## 我支持了哪些文档格式
+## 我的可执行 DocumentChunk 合同是什么
 
-## 我的切片策略是什么
+## tenant、user 和 permission 在哪里过滤
 
-## 我的向量库表结构是什么
+## 八个版本与来源字段分别解决什么问题
 
-## 我的 RAG 问答 API 是什么
+## citation 如何证明来自真实 hit
 
-## 我如何保证引用来自真实检索结果
+## 哪些输入必须拒答
 
-## 我的 10 条评估用例是什么
+## HNSW 与 IVFFlat 的选择证据是什么
 
-## 当前 RAG 效果最差的问题是什么
-
-## 进入第 11 章前我准备优化什么
+## 哪些能力仍只是生产设计练习
 ```
