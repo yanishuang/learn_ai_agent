@@ -89,13 +89,13 @@ LangGraph 更适合有状态、多步骤、可恢复的工作流和 Agent 图。
 | --- | --- | --- | --- |
 | Agent 运行时 | OpenAI Agents SDK | 工具、handoff、trace、guardrails | 主线学习 |
 | 类型安全 Agent | Pydantic AI | Python 团队、结构化输出、evals、Logfire | 主线补强 |
-| 有状态编排 | LangGraph | 可恢复 Workflow、human-in-the-loop、多节点图 | 第 9 章重点 |
+| 有状态编排 | LangGraph | 可恢复 Workflow、human-in-the-loop、多节点图 | 第 8 章重点 |
 | 企业多 Agent | Google ADK | GCP / Google 生态、A2A、多语言 Agent | 进阶比较 |
 | 企业工作流 Agent | Microsoft Agent Framework | Azure / .NET / Python、多 Agent workflow、MCP/A2A 互操作 | 进阶比较 |
 | Coding-agent runtime | Claude Agent SDK | 把 Claude Code 式 agent loop 嵌入产品 | 进阶参考 |
 | 工具互操作 | MCP | 标准化工具、资源、提示词接入 | 第 10 章重点 |
-| Agent 互操作 | A2A | Agent 与 Agent 跨系统协作 | 第 11 章扩展 |
-| 交互式结果 | Apps SDK / MCP Apps | 工具结果渲染为交互式 UI | 第 12 章扩展 |
+| Agent 互操作 | A2A | Agent 与 Agent 跨系统协作 | 第 12 章扩展 |
+| 交互式结果 | Apps SDK / MCP Apps | 工具结果渲染为交互式 UI | 第 13 章扩展 |
 
 判断原则：**先让一个 Python Agent 能稳定完成任务，再考虑跨框架、跨协议、跨平台互操作。**
 
@@ -108,7 +108,7 @@ LangGraph 更适合有状态、多步骤、可恢复的工作流和 Agent 图。
 | Tool Calling | 需要自己封装 | 内置 | 内置 | 可编排 | 可结合 |
 | 多 Agent | 需要自己设计 | Handoff 支持 | 可实现 | 图编排支持 | 非主定位 |
 | RAG | 需要自己实现 | 可调用检索工具 | 可调用检索工具 | 可编排检索流程 | 强项 |
-| 适合阶段 | 第 2 章 | 第 5/8/11 章 | 第 4/5 章 | 第 9 章 | 第 6/7 章 |
+| 适合阶段 | 第 2 章 | 第 5/6/12 章 | 第 4/5 章 | 第 8 章 | 第 7/11 章 |
 
 课程主线建议：
 

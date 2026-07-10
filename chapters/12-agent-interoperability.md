@@ -1,4 +1,4 @@
-# 第 11 章：Agent 互操作与多 Agent 架构设计
+# 第 12 章：多 Agent 设计与互操作
 
 更新时间：2026-07-09
 建议学习时间：5-7 天
@@ -7,7 +7,7 @@
 
 ![Agent 互操作生态](../assets/agent-ecosystem-illustrations/03-agent-interop.png)
 
-## 11.1 本章学习目标
+## 12.1 本章学习目标
 
 学完本章后，你应该能做到：
 
@@ -20,7 +20,7 @@
 
 本章重点不是“让很多 Agent 聊天”，而是设计一个可控、可观测、可扩展的 Agent 平台。
 
-## 11.2 不要过早多 Agent
+## 12.2 不要过早多 Agent
 
 多 Agent 不是 Agent 能力的起点，而是平台化后的结果。
 
@@ -40,7 +40,7 @@
 
 判断原则：**拆 Agent 是为了降低复杂度，不是为了显得智能。**
 
-## 11.3 最小多 Agent 架构
+## 12.3 最小多 Agent 架构
 
 ```text
 用户任务
@@ -70,7 +70,7 @@
 - 评估集。
 - trace 和运行日志。
 
-## 11.4 BaseAgent 抽象
+## 12.4 BaseAgent 抽象
 
 ```python
 from abc import ABC, abstractmethod
@@ -102,7 +102,7 @@ class BaseAgent(ABC):
 
 这个抽象不要设计得太早、太大。先让 2-3 个 Agent 真实跑起来，再提炼公共接口。
 
-## 11.5 Agent Registry
+## 12.5 Agent Registry
 
 Agent Registry 用来管理 Agent 元数据：
 
@@ -133,7 +133,7 @@ create table agent_tools (
 
 生产系统里，不建议让 Agent 动态获得所有工具。Agent 能用哪些工具，应该由 Registry、权限和风险等级共同控制。
 
-## 11.6 Task Router
+## 12.6 Task Router
 
 路由器负责决定任务交给谁。
 
@@ -161,7 +161,7 @@ class RouteDecision(BaseModel):
 
 低置信度时不要乱路由，应该追问用户。
 
-## 11.7 MCP、A2A、Apps 的边界
+## 12.7 MCP、A2A、Apps 的边界
 
 | 协议 / SDK | 解决什么 | 不解决什么 |
 | --- | --- | --- |
@@ -180,20 +180,20 @@ Apps 决定怎么把结果展示给用户操作
 
 这些能力可以组合，但不要混为一谈。
 
-## 11.8 框架选型表
+## 12.8 框架选型表
 
 | 框架 | 强项 | 适合主线吗 |
 | --- | --- | --- |
 | OpenAI Agents SDK | Agent、tools、handoff、trace、guardrails | 是，本课程 Agent 主线 |
 | Pydantic AI | 类型安全、结构化输出、evals、Logfire、durable execution | 是，作为 Python 工程补强 |
-| LangGraph | 状态图、human-in-the-loop、可恢复 workflow | 是，第 9 章重点 |
+| LangGraph | 状态图、human-in-the-loop、可恢复 workflow | 是，第 8 章重点 |
 | Google ADK | 多语言 Agent、A2A、Google 生态集成 | 进阶比较 |
 | Microsoft Agent Framework | .NET / Python、多 Agent workflow、MCP/A2A 互操作 | 进阶比较 |
 | Claude Agent SDK | Claude Code 式 agent loop、编码代理能力 | 进阶参考 |
 
 课程建议：前 10 周不要同时深入所有框架。主线保持 OpenAI SDK / Agents SDK + Pydantic + LangGraph + MCP，其他框架用于做选型报告。
 
-## 11.9 Dodo-Agent MVP
+## 12.9 Dodo-Agent MVP
 
 MVP 功能：
 
@@ -221,7 +221,7 @@ MVP 验收：
 | 失败处理 | 工具失败有结构化错误 |
 | 评估 | 每个 Agent 至少 10 条基础评估用例 |
 
-## 11.10 常见误区
+## 12.10 常见误区
 
 - 多 Agent 只是多个 prompt 名字。
 - Agent 之间传递整段自由文本，导致不可控。
@@ -230,7 +230,7 @@ MVP 验收：
 - 把 A2A 当成 MCP 的替代品。
 - 把交互式 UI 当成 Agent 智能本身。
 
-## 11.11 本章学习资料
+## 12.11 本章学习资料
 
 - [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
 - [OpenAI Agents SDK - Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
@@ -245,10 +245,10 @@ MVP 验收：
 - [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 
-## 11.12 本章复盘模板
+## 12.12 本章复盘模板
 
 ```markdown
-# 第 11 章复盘
+# 第 12 章复盘
 
 ## 我设计了哪些 Agent
 

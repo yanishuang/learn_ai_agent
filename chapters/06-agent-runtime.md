@@ -1,17 +1,17 @@
-# 第 8 章：Agent 基础：执行循环、工具、记忆与 Trace
+# 第 6 章：单 Agent Runtime：执行循环、工具、记忆与 Trace
 
 更新时间：2026-07-09
 建议学习时间：5-7 天  
-适合阶段：已经完成 Tool Calling 和基础 RAG，准备让系统从“一次问答”升级为“多步任务执行”  
+适合阶段：已经完成 Tool Calling，并能使用第 5 章的模拟知识库工具，准备让系统从“一次问答”升级为“多步任务执行”
 本章产出：一个受控单 Agent，可调用天气、订单、知识库检索工具，具备停止条件、失败处理和运行轨迹记录
 
-## 8.1 本章学习目标
+## 6.1 本章学习目标
 
 学完本章后，你应该能做到：
 
 1. 解释 Agent 与普通 Tool Calling 的区别。
 2. 实现一个受控的 Agent 执行循环。
-3. 为 Agent 注册只读工具和 RAG 检索工具。
+3. 为 Agent 注册只读工具和模拟知识库工具，并为第 7 章接入真实 RAG 保留边界。
 4. 设置最大轮数、最大工具次数、超时、token 限制等停止条件。
 5. 记录 Agent run、每轮 step、工具调用和最终状态。
 6. 设计短期记忆和摘要记忆，不滥用长期记忆。
@@ -20,7 +20,7 @@
 
 本章重点是“可控 Agent”，不是追求模型看起来多聪明。
 
-## 8.2 Agent 适用边界
+## 6.2 Agent 适用边界
 
 适合 Agent 的任务：
 
@@ -38,7 +38,7 @@
 
 判断原则：能用普通函数和 Workflow 稳定解决的，不要强行 Agent 化。
 
-## 8.3 基本执行循环
+## 6.3 基本执行循环
 
 ```text
 用户目标
@@ -63,7 +63,7 @@
 | 高风险工具 | 必须人工确认 |
 | 连续失败 | 失败 2 次后退出或追问 |
 
-## 8.4 推荐项目结构
+## 6.4 推荐项目结构
 
 ```text
 app/
@@ -86,7 +86,7 @@ tests/
     test_course_assistant.py
 ```
 
-## 8.5 Agent Run 数据结构
+## 6.5 Agent Run 数据结构
 
 ```python
 from enum import StrEnum
@@ -125,7 +125,7 @@ class AgentStep(BaseModel):
 
 Trace 不是装饰品。没有 trace，就无法解释 Agent 为什么做出某个动作。
 
-## 8.6 使用 OpenAI Agents SDK
+## 6.6 使用 OpenAI Agents SDK
 
 下面示例展示核心思路，具体 API 以当前 SDK 文档为准。
 
@@ -163,16 +163,16 @@ async def run_course_agent(question: str) -> str:
 - Agent instructions 不能替代后端规则。
 - 工具返回要结构化，避免模型误读。
 
-## 8.7 现代 Agent Runtime 能力
+## 6.7 现代 Agent Runtime 能力
 
 Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 runtime 能力：
 
 | 能力 | 解决的问题 | 学习阶段如何处理 |
 | --- | --- | --- |
-| Sessions / 会话状态 | 多轮上下文、短期记忆、任务连续性 | 第 8 章先做会话历史和摘要 |
-| Human-in-the-loop | 高风险工具、审批、纠错 | 第 9 章放入 Workflow 节点 |
-| Trace / Tracing | 解释每一步为什么发生 | 第 8 章记录 run / step / tool_call |
-| Background mode | 深度研究、长报告、复杂工具链路 | 第 9 章作为异步任务处理 |
+| Sessions / 会话状态 | 多轮上下文、短期记忆、任务连续性 | 第 6 章先做会话历史和摘要 |
+| Human-in-the-loop | 高风险工具、审批、纠错 | 第 8 章放入 Workflow 节点 |
+| Trace / Tracing | 解释每一步为什么发生 | 第 6 章记录 run / step / tool_call |
+| Background mode | 深度研究、长报告、复杂工具链路 | 第 8 章作为异步任务处理 |
 | Realtime agent | 语音、低延迟交互、多模态实时输入 | 不进入 12 周主线，可做扩展 |
 
 长任务不要卡在一个 HTTP 请求里等待模型慢慢跑完。更稳的做法是：
@@ -183,7 +183,7 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 4. 每一步写入 trace 和状态表。
 5. 失败后允许从最近 checkpoint 恢复或重新运行。
 
-## 8.8 工具注册策略
+## 6.8 工具注册策略
 
 本章建议只注册低风险工具：
 
@@ -201,9 +201,9 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 - 修改权限。
 - 执行任意代码。
 
-如果要支持这些工具，必须放到第 9 章 Workflow 的人工确认节点里。
+如果要支持这些工具，必须放到第 8 章 Workflow 的人工确认节点里。
 
-## 8.9 记忆设计
+## 6.9 记忆设计
 
 记忆分三类：
 
@@ -225,7 +225,7 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 }
 ```
 
-## 8.10 失败处理
+## 6.10 失败处理
 
 常见失败：
 
@@ -240,14 +240,14 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 
 失败结果要进入 trace，而不是只返回“系统繁忙”。
 
-## 8.11 测试场景
+## 6.11 测试场景
 
 至少准备 10 个 Agent 测试用例：
 
 | 类型 | 示例 | 预期 |
 | --- | --- | --- |
 | 直接回答 | 什么是 Agent？ | 可直接解释或查知识库 |
-| RAG 工具 | 第 6 章 RAG MVP 要做什么？ | 调用知识库工具 |
+| RAG 工具 | 第 7 章 RAG MVP 要做什么？ | 调用知识库工具 |
 | 订单工具 | 订单 O1001 到哪里了？ | 调用订单工具 |
 | 参数缺失 | 我的订单到哪里了？ | 追问订单号 |
 | 无权限 | 查别人的订单 | 拒绝 |
@@ -257,7 +257,7 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 | 高风险请求 | 删除文档 | 拒绝或转人工确认 |
 | 循环风险 | 一直继续查 | 达到停止条件 |
 
-## 8.12 MVP / 进阶 / 生产化验收
+## 6.12 MVP / 进阶 / 生产化验收
 
 ### MVP
 
@@ -282,7 +282,7 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 - 成本和 token 超限自动停止。
 - 长任务走后台任务或 durable workflow，不阻塞单个请求。
 
-## 8.13 常见误区
+## 6.13 常见误区
 
 - 把 Agent 当万能自动化。
 - 不设最大轮数。
@@ -292,7 +292,7 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 - 把长期记忆当数据库。
 - 用同步 HTTP 请求承载深度研究、报告生成等长任务。
 
-## 8.14 本章学习资料
+## 6.14 本章学习资料
 
 - [OpenAI Agents SDK - Agents](https://openai.github.io/openai-agents-python/agents/)
 - [OpenAI Agents SDK - Tools](https://openai.github.io/openai-agents-python/tools/)
@@ -301,10 +301,10 @@ Agent 不只是“模型 + 工具循环”。进入真实产品后，还需要 r
 - [ReAct Paper](https://arxiv.org/abs/2210.03629)
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 
-## 8.15 本章复盘模板
+## 6.15 本章复盘模板
 
 ```markdown
-# 第 8 章复盘
+# 第 6 章复盘
 
 ## 我的 Agent 能调用哪些工具
 

@@ -1,11 +1,11 @@
-# 第 9 章：Workflow 与 State Machine
+# 第 8 章：Workflow 与持久化执行
 
 更新时间：2026-07-09
 建议学习时间：5-7 天  
 适合阶段：已经能实现单 Agent，但发现部分任务需要更稳定、可恢复、可审计的流程  
 本章产出：一个可恢复的深度研究 Workflow，支持状态持久化、步骤日志、失败重试和人工确认
 
-## 9.1 本章学习目标
+## 8.1 本章学习目标
 
 学完本章后，你应该能做到：
 
@@ -19,7 +19,7 @@
 
 本章的核心思想：越接近生产，越要把开放任务拆成可观察、可恢复的步骤。
 
-## 9.2 Workflow 与 Agent 的区别
+## 8.2 Workflow 与 Agent 的区别
 
 | 维度 | Workflow | Agent |
 | --- | --- | --- |
@@ -37,7 +37,7 @@
 - 需要人工确认，优先 Workflow。
 - 任务开放且步骤不固定，再考虑 Agent。
 
-## 9.3 推荐状态模型
+## 8.3 推荐状态模型
 
 任务状态：
 
@@ -78,7 +78,7 @@ class StepStatus(StrEnum):
 | `created_at` | 创建时间 |
 | `updated_at` | 更新时间 |
 
-## 9.4 数据库表设计
+## 8.4 数据库表设计
 
 ### workflow_runs
 
@@ -132,7 +132,7 @@ create table approval_requests (
 );
 ```
 
-## 9.5 深度研究 Workflow
+## 8.5 深度研究 Workflow
 
 目标：
 
@@ -166,7 +166,7 @@ flowchart TD
 | 生成正文 | outline | draft | 输出过长则分段 |
 | 引用检查 | draft + sources | report | 引用缺失则退回 |
 
-## 9.6 LangGraph 适用点
+## 8.6 LangGraph 适用点
 
 LangGraph 适合：
 
@@ -188,7 +188,7 @@ LangGraph 适合：
 | 需要长时间运行和恢复 | 推荐 |
 | 多 Agent 协作图 | 推荐 |
 
-## 9.7 Durable Execution 与 Background Mode
+## 8.7 Durable Execution 与 Background Mode
 
 长任务最怕两类问题：
 
@@ -207,13 +207,13 @@ LangGraph 适合：
 
 课程建议：
 
-1. 第 9 章先做数据库状态机，理解状态和恢复。
+1. 第 8 章先做数据库状态机，理解状态和恢复。
 2. 复杂分支再引入 LangGraph。
 3. 企业长期运行任务再比较 Temporal。
 4. 如果主线选择 Pydantic AI，再评估 durable execution。
 5. 对外 API 统一返回 `run_id`，前端用任务状态展示进度。
 
-## 9.8 人工确认节点
+## 8.8 人工确认节点
 
 高风险步骤必须暂停并等待确认。
 
@@ -242,7 +242,7 @@ LangGraph 适合：
 
 用户确认前，工具不得执行。
 
-## 9.9 幂等与重试
+## 8.9 幂等与重试
 
 长任务一定会失败。失败不可怕，不可恢复才可怕。
 
@@ -270,7 +270,7 @@ run_001:send_email:report_001
 | 权限不足 | 不重试 |
 | 人工拒绝 | 不重试 |
 
-## 9.10 Workflow 与 Agent 的结合
+## 8.10 Workflow 与 Agent 的结合
 
 推荐方式：
 
@@ -289,7 +289,7 @@ Tool 执行具体动作
 
 这样既保留 Agent 灵活性，又保证主流程可控。
 
-## 9.11 测试场景
+## 8.11 测试场景
 
 至少准备：
 
@@ -304,7 +304,7 @@ Tool 执行具体动作
 | 重复提交 | 幂等返回同一 run |
 | 工具超时 | 重试后失败 |
 
-## 9.12 MVP / 进阶 / 生产化验收
+## 8.12 MVP / 进阶 / 生产化验收
 
 ### MVP
 
@@ -329,7 +329,7 @@ Tool 执行具体动作
 - 支持运行中取消和超时回收。
 - 支持 durable execution 或同等的 checkpoint 恢复能力。
 
-## 9.13 常见误区
+## 8.13 常见误区
 
 - 所有复杂任务都交给 Agent 自己规划。
 - 长任务不保存中间状态。
@@ -339,7 +339,7 @@ Tool 执行具体动作
 - Workflow 版本变更后无法解释历史任务。
 - 把 background mode 当作可靠性本身，而不设计自己的状态表和审计表。
 
-## 9.14 本章学习资料
+## 8.14 本章学习资料
 
 - [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview)
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
@@ -349,10 +349,10 @@ Tool 执行具体动作
 - [Pydantic AI Durable Execution](https://pydantic.dev/docs/ai/integrations/durable_execution/overview/)
 - [Temporal Documentation](https://docs.temporal.io/)
 
-## 9.15 本章复盘模板
+## 8.15 本章复盘模板
 
 ```markdown
-# 第 9 章复盘
+# 第 8 章复盘
 
 ## 我的 Workflow 包含哪些步骤
 

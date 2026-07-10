@@ -322,7 +322,7 @@ class LessonAnswer(BaseModel):
 
 ### Service 示例
 
-先让模型输出 JSON，再用 Pydantic 校验。第 6 章进入 RAG 后，`citations` 应该来自真实检索结果，而不是模型自由编造。
+先让模型输出 JSON，再用 Pydantic 校验。第 7 章进入 RAG 后，`citations` 应该来自真实检索结果，而不是模型自由编造。
 
 ```python
 import json

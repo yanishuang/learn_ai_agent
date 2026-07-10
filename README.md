@@ -79,11 +79,15 @@
 
 | 阶段 | 章节 | 核心产出 |
 | --- | --- | --- |
+| 课程准备 | 前置单元 | 配置环境、理解 Fake / Live 模式、运行默认验证 |
 | 基础篇 | 1-4 章 | 会调用模型、写 Prompt、做结构化输出、搭建 Python AI 服务骨架 |
-| 工具与 RAG 篇 | 5-7 章 | 完成工具调用、基础 RAG、高级检索增强 |
-| Agent 篇 | 8-10 章 | 实现 ReAct、Workflow、MCP 工具接入 |
-| 平台篇 | 11-13 章 | 完成多 Agent 平台与企业级工程能力 |
+| 工具与 Agent 篇 | 5-6 章 | 完成可信工具调用和受控单 Agent Runtime |
+| RAG 与 Workflow 篇 | 7-8 章 | 完成核心 RAG 和持久化 Workflow |
+| 评估与协议篇 | 9-10 章 | 建立评估、安全、可观测性和 MCP 接入 |
+| 进阶与生产篇 | 11-13 章 | 完成高级 RAG、多 Agent 互操作与生产治理 |
 | 实战篇 | 14-15 章 | 优先完整交付 Know-Engine，进阶完成 Dodo-Agent MVP |
+
+课程开始前先完成：[课程准备：环境、运行模式与教学项目](chapters/00-course-setup.md)
 
 ## 第 1 章：AI Agent 全景与学习路线
 
@@ -171,57 +175,9 @@
 - 记录一次完整工具调用轨迹。
 - 可选：用 Go 实现一个只读订单查询 MCP Server，让 Python Agent 调用。
 
-## 第 6 章：RAG 基础：从文档到答案
+## 第 6 章：单 Agent Runtime：执行循环、工具、记忆与 Trace
 
-详细学习文档：[第 6 章：RAG 基础：从文档到答案](chapters/06-rag-basics.md)
-
-### 学习目标
-
-- 搭建企业知识库问答系统的最小可用版本。
-- 理解 RAG 的关键链路：加载、解析、切片、向量化、检索、生成、引用。
-
-### 推荐实现
-
-- FastAPI 提供文档上传与问答接口。
-- `pypdf`、`python-docx`、`openpyxl` 解析多格式文件。
-- PostgreSQL + pgvector 存储向量和文档元数据。
-- 先自研 `Loader -> Chunker -> Embedder -> Retriever -> Generator`，再比较 LlamaIndex / LangChain。
-
-### 实战任务
-
-- 上传企业制度文档，完成自动解析和入库。
-- 实现“问题 -> 检索 -> 生成答案 -> 返回引用来源”。
-- 加入文档列表、文档删除、重新索引能力。
-
-## 第 7 章：高级 RAG：检索增强、多源路由与评估
-
-详细学习文档：[第 7 章：高级 RAG：检索增强、多源路由与评估](chapters/07-advanced-rag-and-evaluation.md)
-
-### 学习目标
-
-- 解决基础 RAG 的常见问题：召回差、答案虚、表格难查、多数据源难融合。
-- 设计企业级知识检索增强链路。
-- 建立可重复运行的 RAG 评估集和回归报告。
-
-### 推荐实现
-
-- 使用查询改写提升召回。
-- 使用 pgvector + Elasticsearch / OpenSearch 做混合检索。
-- 使用 rerank 模型或 cross-encoder 做重排。
-- 对结构化数据使用 Text2SQL，但 SQL 权限与审计必须由后端控制。
-- 对关系数据使用 Neo4j / Cypher，但先做固定模板，再考虑模型生成查询。
-
-### 实战任务
-
-- 为知识库增加全文检索。
-- 为销售数据增加受控 Text2SQL 查询。
-- 为组织/产品关系增加图谱查询。
-- 实现检索路由：让系统判断该查文档、数据库还是图谱。
-- 输出评估报告，对比每次检索策略调整的效果。
-
-## 第 8 章：Agent 基础：执行循环、工具、记忆与 Trace
-
-详细学习文档：[第 8 章：Agent 基础：执行循环、工具、记忆与 Trace](chapters/08-agent-basics.md)
+详细学习文档：[第 6 章：单 Agent Runtime：执行循环、工具、记忆与 Trace](chapters/06-agent-runtime.md)
 
 ### 学习目标
 
@@ -241,9 +197,31 @@
 - 增加最多 5 轮工具调用限制。
 - 实现工具调用失败后的重试与兜底回答。
 
-## 第 9 章：Workflow 与 State Machine
+## 第 7 章：RAG 核心：从文档到可信答案
 
-详细学习文档：[第 9 章：Workflow 与 State Machine](chapters/09-workflow-state-machine.md)
+详细学习文档：[第 7 章：RAG 核心：从文档到可信答案](chapters/07-rag-core.md)
+
+### 学习目标
+
+- 搭建企业知识库问答系统的最小可用版本。
+- 理解 RAG 的关键链路：加载、解析、切片、向量化、检索、生成、引用。
+
+### 推荐实现
+
+- FastAPI 提供文档上传与问答接口。
+- `pypdf`、`python-docx`、`openpyxl` 解析多格式文件。
+- PostgreSQL + pgvector 存储向量和文档元数据。
+- 先自研 `Loader -> Chunker -> Embedder -> Retriever -> Generator`，再比较 LlamaIndex / LangChain。
+
+### 实战任务
+
+- 上传企业制度文档，完成自动解析和入库。
+- 实现“问题 -> 检索 -> 生成答案 -> 返回引用来源”。
+- 加入文档列表、文档删除、重新索引能力。
+
+## 第 8 章：Workflow 与持久化执行
+
+详细学习文档：[第 8 章：Workflow 与持久化执行](chapters/08-workflow-durable-execution.md)
 
 ### 学习目标
 
@@ -263,9 +241,23 @@
 - 实现一个“研究主题 -> 报告大纲 -> 资料检索 -> 报告生成”的流程。
 - 给每一步记录状态和耗时。
 
-## 第 10 章：MCP 基础与接入
+## 第 9 章：Agent 评估、可观测性与安全
 
-详细学习文档：[第 10 章：MCP 基础与接入](chapters/10-mcp-integration.md)
+详细学习文档：[第 9 章：Agent 评估、可观测性与安全](chapters/09-agent-evaluation-observability-security.md)
+
+### 学习目标
+
+- 建立 Agent 数据集、确定性断言、trace 指标和人工校准方法。
+- 覆盖工具、参数、轨迹、权限、延迟、成本和安全红队场景。
+
+### 实战任务
+
+- 为 Know-Engine 建立离线评估集和统一回归报告。
+- 把提示词注入、越权、循环和预算耗尽加入安全测试。
+
+## 第 10 章：MCP 集成与信任治理
+
+详细学习文档：[第 10 章：MCP 集成与信任治理](chapters/10-mcp-integration.md)
 
 ### 学习目标
 
@@ -286,9 +278,35 @@
 - 实现一个 MCP Client：从 Python Agent 应用调用 MCP 工具。
 - 使用 MCP Inspector 调试工具列表和调用结果。
 
-## 第 11 章：多 Agent 架构设计
+## 第 11 章：高级 RAG 与受治理的数据路由
 
-详细学习文档：[第 11 章：Agent 互操作与多 Agent 架构设计](chapters/11-agent-interoperability.md)
+详细学习文档：[第 11 章：高级 RAG 与受治理的数据路由](chapters/11-advanced-rag-and-data-routing.md)
+
+### 学习目标
+
+- 解决核心 RAG 的常见问题：召回差、答案虚、表格难查、多数据源难融合。
+- 设计企业级知识检索增强链路。
+- 建立可重复运行的 RAG 评估集和回归报告。
+
+### 推荐实现
+
+- 使用查询改写提升召回。
+- 使用 pgvector + Elasticsearch / OpenSearch 做混合检索。
+- 使用 rerank 模型或 cross-encoder 做重排。
+- 对结构化数据使用 Text2SQL，但 SQL 权限与审计必须由后端控制。
+- 对关系数据使用 Neo4j / Cypher，但先做固定模板，再考虑模型生成查询。
+
+### 实战任务
+
+- 为知识库增加全文检索。
+- 为销售数据增加受控 Text2SQL 查询。
+- 为组织/产品关系增加图谱查询。
+- 实现检索路由：让系统判断该查文档、数据库还是图谱。
+- 输出评估报告，对比每次检索策略调整的效果。
+
+## 第 12 章：多 Agent 设计与互操作
+
+详细学习文档：[第 12 章：多 Agent 设计与互操作](chapters/12-agent-interoperability.md)
 
 ![Agent 互操作生态](assets/agent-ecosystem-illustrations/03-agent-interop.png)
 
@@ -312,48 +330,54 @@
 - 实现 3 个 Agent：知识库问答、Web 搜索、报告生成。
 - 实现简单任务路由：根据用户意图选择 Agent。
 
-## 第 12 章：交互体验与企业集成
+## 第 13 章：产品体验、企业集成与生产治理
 
-### 学习目标
+详细学习文档：[第 13 章：产品体验、企业集成与生产治理](chapters/13-product-experience-and-production.md)
+
+### 产品体验与企业集成
+
+#### 学习目标
 
 - 让 AI 应用从“能跑”变成“可用、可感知、可协作”。
 - 实现流式输出、进度感知、富媒体卡片和企业 IM 集成。
 
-### 推荐实现
+#### 推荐实现
 
 - FastAPI 使用 SSE 或 WebSocket 输出模型 token、工具状态、任务进度。
 - 前端展示引用、工具调用轨迹、失败原因和可重试入口。
 - 企业 IM 入口只做鉴权、消息适配和任务提交，不承载复杂 Agent 逻辑。
 - 进阶：使用 Apps SDK / MCP Apps 思路，把结构化工具结果渲染成可交互组件。
 
-### 实战任务
+#### 实战任务
 
 - 为 Know-Engine 增加流式输出和进度条。
 - 为 Agent 工具调用增加前端可视化轨迹。
 - 接入一个企业 IM 机器人，实现问答入口。
 
-## 第 13 章：企业级工程化
+### 生产治理
 
-### 学习目标
+#### 学习目标
 
 - 掌握 AI Agent 上生产所需的安全、稳定、可观测、可评估能力。
 - 避免“Demo 很惊艳，线上不可控”的常见问题。
 
-### 推荐实现
+#### 推荐实现
 
 - 用 PostgreSQL 记录 conversation、agent_run、tool_call、retrieval_hit、evaluation_case。
 - 用 pytest 固化 RAG 与 tool calling 回归测试。
 - 用 OpenTelemetry / structlog 追踪请求链路。
 - 用限流、超时、幂等 key、人工确认保护高风险工具。
 
-### 实战任务
+#### 实战任务
 
 - 建立 Agent Run 日志表。
 - 为每次回答保存检索结果和引用来源。
 - 实现用户级知识库权限过滤。
 - 增加 RAG 回归测试集。
 
-## 第 14 章：项目实战一：Know-Engine 企业知识库问答系统
+## 第 14 章：Know-Engine 毕业项目
+
+详细学习文档：[第 14 章：Know-Engine 毕业项目](chapters/14-know-engine-capstone.md)
 
 ### 项目目标
 
@@ -380,7 +404,9 @@
 | M4 | 多源路由 | 能选择查文档、SQL 或图谱 |
 | M5 | 企业化 | 权限、日志、评估、流式进度完整 |
 
-## 第 15 章：项目实战二：Dodo-Agent 多智能体平台
+## 第 15 章：Dodo-Agent 进阶项目
+
+详细学习文档：[第 15 章：Dodo-Agent 进阶项目](chapters/15-dodo-agent-capstone.md)
 
 ### 项目目标
 

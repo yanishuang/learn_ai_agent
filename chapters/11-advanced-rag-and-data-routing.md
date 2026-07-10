@@ -1,11 +1,11 @@
-# 第 7 章：高级 RAG：检索增强、多源路由与评估
+# 第 11 章：高级 RAG 与受治理的数据路由
 
 更新时间：2026-07-09
 建议学习时间：7-10 天  
 适合阶段：已经完成基础 RAG MVP，但发现召回、引用、表格、多源数据和效果评估仍不稳定  
 本章产出：一个支持查询改写、混合检索、rerank、多源路由和回归评估的 RAG 增强版
 
-## 7.1 本章学习目标
+## 11.1 本章学习目标
 
 学完本章后，你应该能做到：
 
@@ -19,7 +19,7 @@
 
 本章的核心是：不要用“感觉回答不错”判断 RAG，要用可复现测试判断每一步。
 
-## 7.2 RAG 问题诊断表
+## 11.2 RAG 问题诊断表
 
 | 现象 | 可能原因 | 优先检查 |
 | --- | --- | --- |
@@ -33,7 +33,7 @@
 
 先定位瓶颈，再优化。不要一上来堆框架。
 
-## 7.3 查询改写
+## 11.3 查询改写
 
 查询改写适合处理：
 
@@ -75,7 +75,7 @@ class QueryRewriteResult(BaseModel):
 - 改写后的 query 要记录到日志。
 - 改写失败时回退原始 query。
 
-## 7.4 混合检索
+## 11.4 混合检索
 
 基础向量检索适合语义相近问题，但对精确词、编号、制度名、产品型号不一定稳定。混合检索结合：
 
@@ -100,7 +100,7 @@ def rrf(rank: int, k: int = 60) -> float:
 
 本章优先实现可解释、可调参的融合方式，不追求复杂算法。
 
-## 7.5 Rerank
+## 11.5 Rerank
 
 Rerank 的作用是对初步召回的候选 chunk 重新排序。
 
@@ -127,7 +127,7 @@ Rerank 适合解决：
 - rerank 输入不要太多，先召回 20-50 个候选即可。
 - rerank 结果要记录，便于评估。
 
-## 7.6 Metadata 与权限过滤
+## 11.6 Metadata 与权限过滤
 
 企业 RAG 里，metadata 不是锦上添花，而是安全边界。
 
@@ -149,7 +149,7 @@ Rerank 适合解决：
 3. 不要先把无权限 chunk 送给模型再让模型“不要使用”。
 4. retrieval hits 日志只保存用户可见片段。
 
-## 7.7 表格与 Excel 处理
+## 11.7 表格与 Excel 处理
 
 表格是 RAG 的高发失败点。不要把 Excel 直接转成一坨文本。
 
@@ -180,7 +180,7 @@ Rerank 适合解决：
 - 大表和强计算问题应该走 SQL。
 - RAG 不应该替代数据仓库。
 
-## 7.8 Text2SQL 的边界
+## 11.8 Text2SQL 的边界
 
 Text2SQL 可以提升结构化数据问答能力，但风险很高。
 
@@ -222,7 +222,7 @@ limit :limit;
 - 强制 `tenant_id`。
 - 记录 SQL 模板 ID，而不是只记录自然语言问题。
 
-## 7.9 Text2Cypher 与图谱查询
+## 11.9 Text2Cypher 与图谱查询
 
 图谱适合：
 
@@ -248,7 +248,7 @@ limit 20
 - 结果行数限制。
 - 查询超时。
 
-## 7.10 多源路由
+## 11.10 多源路由
 
 多源路由的目标是判断问题应该查哪里：
 
@@ -281,7 +281,7 @@ class RetrievalRoute(BaseModel):
 
 低置信度时不要乱查，应该追问用户或使用更保守的数据源。
 
-## 7.11 RAG 评估体系
+## 11.11 RAG 评估体系
 
 基础评估指标：
 
@@ -307,7 +307,7 @@ class RetrievalRoute(BaseModel):
 }
 ```
 
-第 7 章建议先用规则指标和人工抽检，不急着引入复杂自动评委。后续可以比较 RAGAS、DeepEval、LlamaIndex evaluation、Pydantic Evals。
+第 11 章建议先用规则指标和人工抽检，不急着引入复杂自动评委。后续可以比较 RAGAS、DeepEval、LlamaIndex evaluation、Pydantic Evals。
 
 ### 评估结果如何进入工程链路
 
@@ -323,7 +323,7 @@ class RetrievalRoute(BaseModel):
 
 Pydantic Evals、Logfire、OpenTelemetry 可以分别承担数据集评估、运行时观测和分布式追踪；它们不是必须同时引入，但课程项目至少要保留可扩展接口。
 
-## 7.12 回归测试集设计
+## 11.12 回归测试集设计
 
 评估集至少包含：
 
@@ -350,11 +350,11 @@ Pydantic Evals、Logfire、OpenTelemetry 可以分别承担数据集评估、运
 
 每次改动切片、检索、rerank、prompt、模型，都跑同一套评估集。
 
-## 7.13 实施顺序
+## 11.13 实施顺序
 
 推荐按下面顺序做：
 
-1. 先保存第 6 章的评估集基线。
+1. 先保存第 7 章的评估集基线。
 2. 增加查询改写。
 3. 增加全文检索。
 4. 增加融合排序。
@@ -366,7 +366,7 @@ Pydantic Evals、Logfire、OpenTelemetry 可以分别承担数据集评估、运
 
 不要同时改多个变量，否则不知道效果来自哪里。
 
-## 7.14 MVP / 进阶 / 生产化验收
+## 11.14 MVP / 进阶 / 生产化验收
 
 ### MVP
 
@@ -392,7 +392,7 @@ Pydantic Evals、Logfire、OpenTelemetry 可以分别承担数据集评估、运
 - 支持检索策略版本化。
 - 支持线上失败样本回流到评估集。
 
-## 7.15 常见误区
+## 11.15 常见误区
 
 - 只看最终回答，不看检索结果。
 - 用模型自动评分替代人工校验所有事实。
@@ -401,7 +401,7 @@ Pydantic Evals、Logfire、OpenTelemetry 可以分别承担数据集评估、运
 - RAG 查表格时不保留表头和坐标。
 - 同时调整切片、embedding、top_k、prompt，导致无法定位收益。
 
-## 7.16 本章学习资料
+## 11.16 本章学习资料
 
 - [LlamaIndex Evaluating](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/)
 - [RAGAS](https://docs.ragas.io/)
@@ -412,10 +412,10 @@ Pydantic Evals、Logfire、OpenTelemetry 可以分别承担数据集评估、运
 - [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/)
 - [pgvector](https://github.com/pgvector/pgvector)
 
-## 7.17 本章复盘模板
+## 11.17 本章复盘模板
 
 ```markdown
-# 第 7 章复盘
+# 第 11 章复盘
 
 ## 我的基础 RAG 最大问题是什么
 

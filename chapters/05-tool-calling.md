@@ -335,7 +335,7 @@ async def can_view_order(user_id: str, order_id: str) -> bool:
 
 ## 5.11 示例：知识库搜索工具
 
-第 5 章先做一个假的知识库搜索工具，第 6 章再升级成真正的 RAG 检索。
+第 5 章先做一个假的知识库搜索工具，第 7 章再升级成真正的 RAG 检索。
 
 ```python
 from pydantic import BaseModel, Field
@@ -625,7 +625,7 @@ Tool Calling 是 Agent 的基础，但不等于 Agent。
 | 规划步骤 | 不一定 | 通常需要 |
 | 失败恢复 | 简单 | 更复杂 |
 
-第 5 章只要求你掌握工具调用。第 8 章才会进入 Agent 执行循环。
+第 5 章只要求你掌握工具调用。第 6 章才会进入 Agent 执行循环。
 
 ## 5.19 Go 扩展：什么时候把工具抽到 Go
 
@@ -694,7 +694,7 @@ Python 普通函数
 - 工具名：`search_course_knowledge`。
 - 参数：`query`、`top_k`。
 - 先使用内存假数据。
-- 第 6 章再升级为向量检索。
+- 第 7 章再升级为向量检索。
 
 验收：
 
@@ -850,7 +850,7 @@ Python 普通函数
 
 ## 哪些工具未来适合抽到 Go / MCP Server
 
-## 进入 RAG 前我还不清楚的问题
+## 进入单 Agent Runtime 前我还不清楚的问题
 ```
 
 Tool Calling 是让 AI 应用从“会说”走向“会做”的第一步。越早建立工具边界、权限和日志意识，后面的 Agent 才越不容易失控。
