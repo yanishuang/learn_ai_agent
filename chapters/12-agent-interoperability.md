@@ -1,268 +1,337 @@
 # 第 12 章：多 Agent 设计与互操作
 
-更新时间：2026-07-09
+更新时间：2026-07-10
 建议学习时间：5-7 天
-适合阶段：已经完成单 Agent、Workflow、MCP，准备设计平台化 Agent 系统
-本章产出：一个 BaseAgent 抽象、一个 Agent Registry、一个任务路由器、一份 Agent 框架与协议选型说明
+本章产出：一个先 agents-as-tools、再 handoff、最后可选远程 A2A 的渐进设计；一组框架无关的结构化合同；一份按成熟度和业务需要形成的互操作决策记录。
+
+## 本章定位
+
+多 Agent 的目标是把职责、工具、权限和评估边界变清楚，不是增加会互相聊天的 prompt 数量。先证明一个受控 Agent 无法在清晰边界内完成任务，再考虑 specialist；先在同一进程用 agents-as-tools 或 handoff 验证职责，再考虑远程协议。
+
+参考实现当前提供框架无关的 `RunContext`、`RunLimits`、`BoundedAgentRunner.run()` 和不可变 `AgentResult`，但没有多 Agent runtime、Registry 或 A2A adapter。本章所有组合示例都是基于这些现有合同的**Advanced 设计/实验**，不声称已经落入参考源码，也不要求任何框架专用 SDK。
 
 ![Agent 互操作生态](../assets/agent-ecosystem-illustrations/03-agent-interop.png)
 
-## 12.1 本章学习目标
+## 前置知识
 
-学完本章后，你应该能做到：
+- 已完成第 6、8、9、10 章，理解受限 Agent loop、Workflow、trace/eval 和 MCP 信任边界。
+- 能阅读 Python `Protocol`、Pydantic 判别联合、异步调用和结构化错误。
+- 能区分同进程函数调用、持久化 Workflow、远程 HTTP/RPC 和协议互操作。
 
-1. 区分单 Agent、Workflow、多 Agent、Agent 平台。
-2. 设计 BaseAgent、Agent Registry、Task Router 和 Agent Run 记录。
-3. 说明 MCP、A2A、Apps SDK / MCP Apps 分别解决哪一层问题。
-4. 比较 OpenAI Agents SDK、Pydantic AI、LangGraph、Google ADK、Microsoft Agent Framework、Claude Agent SDK 的适用边界。
-5. 知道什么时候应该拆成多个 Agent，什么时候不应该。
-6. 为 Dodo-Agent 设计一个可落地的多 Agent MVP。
+## 学习目标
 
-本章重点不是“让很多 Agent 聊天”，而是设计一个可控、可观测、可扩展的 Agent 平台。
+完成本章后，你应该能够：
 
-## 12.2 不要过早多 Agent
+1. 判断单 Agent + tools、Workflow、agents-as-tools、handoff 和远程 Agent 各自何时适用。
+2. 复用可信 `RunContext`、执行预算和 `AgentResult`，不让自由文本携带身份或权限。
+3. 先把 specialist 包装为受控工具，再设计明确所有权转移的 handoff。
+4. 为 Registry、路由、handoff 深度、取消、超时和 trace 定义平台边界。
+5. 解释 MCP 与 A2A 互补：前者接工具/上下文，后者做 Agent 间远程协作。
+6. 准确陈述 A2A 1.0 Stable 但 Optional、Google ADK 的 A2A 集成 Experimental、Microsoft Agent Framework Preview。
+7. 在不要求框架专用 API 的情况下完成 specialist 和端到端评估。
 
-多 Agent 不是 Agent 能力的起点，而是平台化后的结果。
+## 核心知识
 
-不建议拆多 Agent 的情况：
+### 12.1 拆分门槛
 
-- 任务仍然可以由一个 Agent + 几个工具完成。
-- 工具边界还没稳定。
-- 没有 trace、评估、权限和失败恢复。
-- 每个 Agent 只是换了一段 prompt，没有独立职责。
+保持单 Agent 的情况：
 
-适合拆多 Agent 的情况：
+- 一个 Agent + 少量严格工具已经能完成任务；
+- specialist 只有不同 prompt，没有不同职责、权限或评估集；
+- 工具、状态、trace、恢复和评估尚未稳定；
+- 拆分后只增加自由文本传递和失败点。
 
-- 不同 Agent 有明显不同的工具集和权限。
-- 不同 Agent 需要不同评估集。
-- 任务天然分工，例如研究、检索、分析、报告、文件处理。
-- 平台需要按团队、场景、版本注册和治理 Agent。
+考虑拆分的证据：
 
-判断原则：**拆 Agent 是为了降低复杂度，不是为了显得智能。**
+- 工具/数据权限必须隔离；
+- specialist 有独立输入输出合同和评估集；
+- 某阶段需要不同模型、延迟或成本预算；
+- 所有权转移、人工审批或长任务恢复必须显式化；
+- 组织或部署边界要求独立版本和责任人。
 
-## 12.3 最小多 Agent 架构
+判断原则：拆分后必须能减少某种可测复杂度或风险。
 
-```text
-用户任务
-  -> Task Router
-  -> Agent Registry
-  -> 选择一个或多个 Agent
-  -> Agent 调用工具 / RAG / MCP
-  -> 汇总结构化结果
-  -> 返回最终答案或进入 Workflow
-```
+### 12.2 复用当前 Agent 合同
 
-推荐先实现 3 个 Agent：
-
-| Agent | 职责 | 工具 |
-| --- | --- | --- |
-| KnowledgeAgent | 企业知识库问答 | RAG 检索、引用生成 |
-| ResearchAgent | 外部资料研究 | Web search、资料摘要、来源检查 |
-| ReportAgent | 报告生成 | 大纲生成、章节写作、引用检查 |
-
-每个 Agent 都应该有：
-
-- 名称和版本。
-- instructions。
-- 输入输出 schema。
-- 可用工具列表。
-- 风险等级。
-- 评估集。
-- trace 和运行日志。
-
-## 12.4 BaseAgent 抽象
+参考实现的真实入口不是旧式 `BaseAgent.run(AgentInput)`，而是：
 
 ```python
-from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field
+result = await runner.run(
+    question,
+    context,
+    limits,
+    session_id=session_id,
+)
+```
+
+其中 `context: RunContext` 保存可信 `user_id`、`tenant_id`、`request_id` 和 permissions；`limits: RunLimits` 强制 turns、tool calls、output tokens 和 total timeout；`AgentResult` 返回 final content、typed stop reason、messages、model tool-call evidence、tool results、trace ID 和可选 continuation。
+
+多 Agent 层必须保留这些边界：
+
+- 身份和权限从平台生成的 `RunContext` 传递，不能从 Agent 文本复制；
+- 子任务预算从父预算分配，不能每个 specialist 重置为无限预算；
+- 子结果先校验 `stop_reason`、schema 和权限证据，再进入汇总；
+- trace 通过父 run ID / child trace ID 关联，敏感参数仍然脱敏；
+- session key 继续按 tenant/user/session 隔离。
+
+### 12.3 第一成熟门：agents-as-tools
+
+agents-as-tools 保留一个 orchestrator 的最终所有权。Specialist 像一个高层工具：接收结构化任务，返回结构化结果，不直接接管用户会话。
+
+框架无关合同可以是：
+
+```python
+from typing import Literal, Protocol
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from agent_course.agents.runner import AgentResult
+from agent_course.core import RunContext, RunLimits
 
 
-class AgentInput(BaseModel):
-    user_id: str
-    tenant_id: str
-    task: str
-    context: dict = Field(default_factory=dict)
+class SpecialistTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
-class AgentOutput(BaseModel):
-    answer: str
+class SpecialistResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["completed", "refused", "failed"]
+    summary: str
     citations: list[str] = Field(default_factory=list)
-    confidence: str = "medium"
-    next_actions: list[str] = Field(default_factory=list)
+    child_trace_id: str
 
 
-class BaseAgent(ABC):
-    name: str
-    version: str
-
-    @abstractmethod
-    async def run(self, payload: AgentInput) -> AgentOutput:
-        raise NotImplementedError
+class Specialist(Protocol):
+    async def run(
+        self,
+        task: SpecialistTask,
+        context: RunContext,
+        limits: RunLimits,
+    ) -> tuple[SpecialistResult, AgentResult]: ...
 ```
 
-这个抽象不要设计得太早、太大。先让 2-3 个 Agent 真实跑起来，再提炼公共接口。
+这是设计合同，不在当前参考实现中。Adapter 负责把 `SpecialistTask.objective` 传入现有 runner，并把 `AgentResult` 的停止原因、引用和 trace 转换为严格结果。Orchestrator 只暴露 Registry 允许的 specialist，限制 fan-out、总 child 数、总 token/tool/time budget，并拒绝 specialist 请求扩权。
 
-## 12.5 Agent Registry
+agents-as-tools 适合可组合子任务、集中汇总和不需要会话所有权转移的场景。它比远程互操作更容易离线测试和调试，应成为第一个多 Agent 实验。
 
-Agent Registry 用来管理 Agent 元数据：
+### 12.4 第二成熟门：handoff
 
-```sql
-create table agents (
-  id text primary key,
-  name text not null,
-  version text not null,
-  description text not null,
-  risk_level text not null,
-  enabled boolean not null default true,
-  config_json jsonb not null default '{}',
-  created_at timestamptz not null default now()
-);
-```
-
-工具绑定：
-
-```sql
-create table agent_tools (
-  agent_id text not null references agents(id),
-  tool_name text not null,
-  risk_level text not null,
-  enabled boolean not null default true,
-  primary key (agent_id, tool_name)
-);
-```
-
-生产系统里，不建议让 Agent 动态获得所有工具。Agent 能用哪些工具，应该由 Registry、权限和风险等级共同控制。
-
-## 12.6 Task Router
-
-路由器负责决定任务交给谁。
-
-先用规则：
-
-| 规则 | 路由 |
-| --- | --- |
-| 用户问公司制度、项目文档 | KnowledgeAgent |
-| 用户要求调研行业、竞品、资料 | ResearchAgent |
-| 用户要求生成报告、周报、总结 | ReportAgent |
-| 用户要求执行高风险动作 | Workflow + 人工确认 |
-
-再用模型做辅助分类：
+handoff 表示当前 Agent 将任务所有权交给另一个 Agent。只有当 specialist 需要直接继续会话、独立追问或使用不同策略时才使用。请求必须结构化：
 
 ```python
 from typing import Literal
-from pydantic import BaseModel
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class HandoffRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_agent: Literal["knowledge", "research", "report"]
+    objective: str
+    reason: str
+    allowed_context_ids: list[str] = Field(default_factory=list, max_length=20)
+    remaining_handoffs: int = Field(ge=0, le=3)
+```
+
+平台而不是模型执行 handoff：Registry 检查 target、版本、enabled、风险和调用者是否允许；上下文只按 `allowed_context_ids` 重建；身份不从请求字段读取；预算递减；handoff 链记录 parent/child run；循环、深度耗尽、target 禁用和权限不相交都返回结构化停止。
+
+handoff 不应传递完整隐藏 prompt、全部聊天记录、原始 secrets 或无限工具列表。高风险动作仍交给 Workflow + 权威审批，不能通过 handoff 绕过。
+
+### 12.5 Router 与 Registry
+
+Router 先用规则，再用受限模型分类，低置信度返回 clarify：
+
+```python
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 
 class RouteDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     route: Literal["knowledge", "research", "report", "workflow", "clarify"]
     reason: str
     confidence: Literal["high", "medium", "low"]
 ```
 
-低置信度时不要乱路由，应该追问用户。
+Registry 至少记录 agent stable ID、version、owner、description、input/output schema hash、allowed tools/data classes、required permissions、risk、maturity、evaluation version、enabled、timeout 和 deployment endpoint。模型输出的 route 只是建议；平台根据 Registry 和可信权限做最终决定。
 
-## 12.7 MCP、A2A、Apps 的边界
+生产 Registry 更新需要审核和原子版本切换。运行记录固定实际 agent/config/schema 版本，避免回放时静默使用最新版。
 
-| 协议 / SDK | 解决什么 | 不解决什么 |
+### 12.6 Workflow 与多 Agent 的边界
+
+| 需求 | 首选 |
+| --- | --- |
+| 同一次运行内调用一个 specialist 并汇总 | agents-as-tools |
+| specialist 接管会话并直接追问 | handoff |
+| 固定步骤、审批、等待、重试、取消、恢复 | durable Workflow |
+| 跨部署/组织发现和调用远程 Agent | 可选 A2A |
+| Agent 接订单、搜索、数据库等能力 | MCP 或本地 tools |
+
+这些可以组合：Workflow 的某一步调用 orchestrator；orchestrator 把研究 specialist 当工具；specialist 通过 MCP 查询外部能力。不要用多 Agent 对话模拟持久化状态机。
+
+### 12.7 MCP 与 A2A 是互补层
+
+| 层 | 解决什么 | 不解决什么 |
 | --- | --- | --- |
-| MCP | Agent / Host 如何标准化接入工具、资源、提示词 | 不决定 Agent 如何规划，也不替代业务权限 |
-| A2A | 不同 Agent 如何跨系统发现、通信、协作 | 不替代工具协议，也不保证任务质量 |
-| Apps SDK / MCP Apps | 工具结果如何渲染成交互式 UI | 不替代工具 schema、权限、审计 |
+| MCP | Host/Agent 如何接入 Tools、Resources、Prompts | Agent 间任务所有权与远程协作 |
+| A2A | 独立 Agent 如何发现能力并交换任务/结果 | 工具接入、业务权限和任务质量 |
+| Apps SDK / MCP Apps | 结构化结果如何变成交互 UI | Agent runtime、权限、审计 |
 
-推荐理解：
+A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内部通过 MCP 调用工具。两层分别需要身份、授权、schema、timeout、审计和版本控制，不能因为底层工具已授权就自动授权远程 Agent。
 
-```text
-Agent runtime 决定怎么思考和行动
-MCP 决定怎么接工具和上下文
-A2A 决定怎么和其他 Agent 协作
-Apps 决定怎么把结果展示给用户操作
+### 12.8 第三成熟门：A2A 1.0 Stable，但仍 Optional
+
+截至[生态成熟度矩阵](../docs/ecosystem-maturity.md)的 2026-07-10 验证日期，A2A Protocol 1.0 的发布规范是 **Stable**。课程仍将它列为 **Optional**，因为成熟度回答“协议是否稳定”，不回答“当前项目是否需要跨 Agent/跨组织互操作”。同进程 agents-as-tools、handoff 或普通受控服务 API 已满足需求时，不应为协议而协议。
+
+采用 A2A 前必须通过这些门：
+
+1. 两端 Agent 的职责、输入输出、身份和错误合同已经稳定。
+2. 本地组合和 handoff 评估已通过，远程化解决真实部署/组织问题。
+3. Agent Card/能力发现内容按不可信元数据处理，并有 endpoint allowlist。
+4. 认证之外还有业务授权、tenant/data policy、consent 和 delegation 范围。
+5. 有协议版本、schema compatibility、超时、取消、重试/幂等、审计和端到端 trace。
+6. 有不采用 A2A 的 fallback，协议实验失败不阻塞课程 Core。
+
+本章不要求 A2A SDK 或远程服务。可选实验可以只写 adapter 合同、威胁模型和互操作测试计划。
+
+### 12.9 框架与功能成熟度要分别标记
+
+以下标签以矩阵和官方主来源在 2026-07-10 的记录为准：
+
+| 技术 | 当前标签 | 本章用法 |
+| --- | --- | --- |
+| OpenAI Agents SDK | Stable（核心 runtime） | 可选比较 handoff/agents-as-tools，不是作业依赖 |
+| Pydantic AI 1.x | Stable | 可选类型化 Agent 比较 |
+| LangGraph 1.x | Stable | 可选状态图/Workflow 比较 |
+| Google ADK Python 1.0 | Stable | 可选框架评估 |
+| Google ADK 的 A2A integration | Experimental | 官方 ADK A2A 页面明确标记 Experimental；隔离 adapter，不作为必修 |
+| Microsoft Agent Framework | Preview | 仅探索；隔离 adapter 并准备 breaking changes |
+| Claude Agent SDK 0.2.x | Preview | 可选 sandboxed 实验 |
+| A2A Protocol 1.0 | Stable | 仍是 Optional remote interoperability extension |
+
+“协议 Stable”不能把某个框架 adapter 的 Experimental 状态抹掉；“框架 Stable”也不能推导其所有扩展都 Stable。课程合同保持 provider/framework-neutral，框架专用 decorators、handoff API、Agent 类或 A2A SDK 都不能成为 Core 作业要求。
+
+### 12.10 评估：specialist 与端到端都要测
+
+每个 specialist 独立评估：任务成功、工具选择、参数、引用/事实、权限拒绝、stop reason、turn/tool/token/time budget。组合层评估：route 准确、handoff 目标、合同校验、总预算、循环停止、失败传播、最终汇总、parent/child trace 完整性。
+
+端到端成功不能掩盖 specialist 越权或无限 handoff；specialist 单测通过也不能证明 Router/汇总正确。至少包含：错误 route、禁用 Agent、schema drift、权限不相交、child timeout、部分失败、handoff loop、取消传播和恶意远程能力描述。
+
+## 教师演示
+
+1. 用一个 `BoundedAgentRunner` 完成订单任务，说明没有拆分证据时保持单 Agent。
+2. 把知识检索 specialist 设计成工具，展示 orchestrator 仍拥有最终答案和预算。
+3. 对比 handoff：展示所有权、session、预算和 trace 如何转移而权限不扩大。
+4. 画出 remote Agent 内部再调用 MCP tool 的两层链路，指出各自的授权与 timeout。
+5. 对照矩阵和官方页面，分别标记 A2A 1.0 Stable、ADK A2A Experimental、Microsoft Agent Framework Preview。
+
+## 学员实验
+
+Task 11 将创建 `labs/chapter-12/`；该目录不在本次提交中。本章当前实验是框架无关设计和离线 contract test：
+
+1. 选择一个单 Agent 失败 case，说明为何需要 specialist，而不是只换 prompt 名称。
+2. 用 `SpecialistTask`/`SpecialistResult` 写 agents-as-tools adapter 测试计划。
+3. 写 `HandoffRequest` 的合法、未知 target、额外字段、深度耗尽和权限不相交 case。
+4. 设计 Registry 记录和原子版本升级流程。
+5. 为两个 specialist 各写 10 条 case，再写 15 条 Router/端到端 case。
+6. 写 MCP/A2A/Apps 分层图和信任边界。
+7. Optional：写 A2A adoption record，必须包含真实远程需求、maturity、fallback、威胁和不采用方案；不要求框架 SDK。
+
+## 失败注入与排错
+
+| 注入 | 预期结果 | 首查位置 |
+| --- | --- | --- |
+| Router 低置信度 | `clarify`，不调用 specialist | route policy |
+| 模型选择禁用 Agent | Registry 拒绝 | platform dispatch |
+| child 请求额外权限 | 权限不扩大并拒绝动作 | trusted context |
+| specialist output 多字段 | schema 校验失败 | adapter boundary |
+| handoff A -> B -> A | 深度/visited guard 停止 | handoff controller |
+| child timeout | 结构化失败并消耗父预算 | budget manager |
+| 一个并行 child 失败 | 按明确策略部分失败/取消 | orchestrator |
+| 远程 Agent Card 注入指令 | 只作不可信元数据 | A2A registry |
+| A2A endpoint schema drift | 隔离 adapter/version | compatibility gate |
+
+排错顺序：route 决策、Registry 版本/权限、输入合同、child run/trace、输出合同、预算/取消、汇总。远程场景再查协议协商、网络、认证与业务授权。
+
+## 自动验证
+
+当前 Agent 合同的 focused tests 完全离线：
+
+```bash
+cd reference-implementation
+uv run --group dev --extra live pytest \
+  tests/test_agent_runner.py tests/test_tools.py tests/test_evals.py -q
 ```
 
-这些能力可以组合，但不要混为一谈。
+课程完整回归：
 
-## 12.8 框架选型表
+```bash
+cd reference-implementation
+uv run --group dev --extra live pytest -q
+```
 
-| 框架 | 强项 | 适合主线吗 |
+这些测试证明当前单 Agent、工具权限、预算、session/tenant 隔离、trace 和 eval 合同；不证明 Registry、agents-as-tools、handoff 或 A2A 已实现。Task 11 lab 需要为结构化 adapter 和组合失败补测试。任何框架/A2A live interop 都必须单独 opt-in，不能进入默认离线 suite。
+
+## 作业与评分
+
+| 项目 | 权重 | 评分证据 |
 | --- | --- | --- |
-| OpenAI Agents SDK | Agent、tools、handoff、trace、guardrails | 是，本课程 Agent 主线 |
-| Pydantic AI | 类型安全、结构化输出、evals、Logfire、durable execution | 是，作为 Python 工程补强 |
-| LangGraph | 状态图、human-in-the-loop、可恢复 workflow | 是，第 8 章重点 |
-| Google ADK | 多语言 Agent、A2A、Google 生态集成 | 进阶比较 |
-| Microsoft Agent Framework | .NET / Python、多 Agent workflow、MCP/A2A 互操作 | 进阶比较 |
-| Claude Agent SDK | Claude Code 式 agent loop、编码代理能力 | 进阶参考 |
+| 拆分理由与边界 | 20% | 单 Agent baseline、职责/权限/评估差异 |
+| agents-as-tools | 25% | 严格输入输出、预算、错误和 child trace |
+| handoff/Registry | 25% | 所有权、版本、循环、权限、取消和升级 |
+| 评估 | 20% | specialist + Router + end-to-end cases |
+| 协议/成熟度判断 | 10% | MCP/A2A 分层、标签、Optional 决策与 fallback |
 
-课程建议：前 10 周不要同时深入所有框架。主线保持 OpenAI SDK / Agents SDK + Pydantic + LangGraph + MCP，其他框架用于做选型报告。
+自由文本携带身份、无限 handoff、远程能力描述决定权限、A2A 替代 MCP 或强制框架 SDK，均不能通过。
 
-## 12.9 Dodo-Agent MVP
+## Core / Advanced / Production 完成标准
 
-MVP 功能：
-
-1. 用户提交任务。
-2. Task Router 选择 Agent。
-3. Agent 调用工具、RAG 或 MCP。
-4. 系统记录 run、step、tool_call。
-5. 前端展示最终答案、引用、工具轨迹和失败原因。
-
-暂不做：
-
-- 完整 A2A 协议实现。
-- 所有框架统一 runtime。
-- 自动生成和上线新 Agent。
-- 高风险工具自动执行。
-- 复杂企业 IM 全量集成。
-
-MVP 验收：
-
-| 能力 | 验收 |
+| 等级 | 完成标准 |
 | --- | --- |
-| 路由 | 10 个测试问题中至少 8 个路由正确 |
-| 工具 | 每个 Agent 只能调用授权工具 |
-| Trace | 能看到 Agent run、step、tool_call |
-| 失败处理 | 工具失败有结构化错误 |
-| 评估 | 每个 Agent 至少 10 条基础评估用例 |
+| Core | 保持单 Agent 或 Workflow；能准确解释 MCP/A2A/Apps 与成熟度；无框架专用依赖。 |
+| Advanced | 先实现并测试 agents-as-tools，再按需要实现 handoff；有 Registry、预算、结构化合同和双层评估。 |
+| Production | 版本化 Registry、持久 run/handoff、取消/恢复、delegation/consent、总预算、端到端 trace、schema migration 和事故控制；A2A 仅在远程需求成立时采用。 |
 
-## 12.10 常见误区
+## 本章资料
 
-- 多 Agent 只是多个 prompt 名字。
-- Agent 之间传递整段自由文本，导致不可控。
-- 没有 Registry，工具权限散落在代码里。
-- 为了追新协议而忽略 RAG、工具、Workflow 基础。
-- 把 A2A 当成 MCP 的替代品。
-- 把交互式 UI 当成 Agent 智能本身。
-
-## 12.11 本章学习资料
-
-- [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
+- [生态成熟度矩阵](../docs/ecosystem-maturity.md)
+- [OpenAI Agents SDK - Agents as tools](https://openai.github.io/openai-agents-python/tools/#agents-as-tools)
 - [OpenAI Agents SDK - Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
-- [Pydantic AI Documentation](https://ai.pydantic.dev/)
-- [LangGraph Documentation](https://docs.langchain.com/oss/python/langgraph/overview)
-- [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)
-- [MCP Apps](https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/)
-- [OpenAI Apps SDK](https://developers.openai.com/apps-sdk)
-- [Google Agent Development Kit](https://adk.dev/)
-- [Google A2A Protocol](https://adk.dev/a2a/)
-- [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/overview/)
-- [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)
+- [A2A Protocol 1.0 announcement](https://a2a-protocol.org/latest/announcing-1.0/)
+- [A2A latest released specification](https://a2a-protocol.org/dev/specification/)
+- [Google ADK A2A - Experimental](https://adk.dev/a2a/)
+- [Google ADK Python 1.0 announcement](https://developers.googleblog.com/en/agents-adk-agent-engine-a2a-enhancements-google-io/)
+- [Microsoft Agent Framework overview](https://learn.microsoft.com/en-us/agent-framework/overview/)
+- [Model Context Protocol](https://modelcontextprotocol.io/docs/getting-started/intro)
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 
-## 12.12 本章复盘模板
+## 复盘模板
 
 ```markdown
 # 第 12 章复盘
 
-## 我设计了哪些 Agent
+## 单 Agent baseline 为什么不足或已经足够
 
-## 每个 Agent 的职责和工具是什么
+## 第一个 specialist 为什么采用 agents-as-tools
 
-## Task Router 如何做决策
+## 哪个场景真的需要 handoff
 
-## 哪些任务必须进入 Workflow
+## 身份、权限、预算和 trace 如何穿过 child run
 
-## MCP、A2A、Apps SDK 在我的系统里分别负责什么
+## Registry 如何固定版本、合同和工具权限
 
-## 我为什么没有过早引入某些框架
+## specialist 与端到端分别如何评估
 
-## 我的 Agent Registry 记录哪些字段
+## MCP 与 A2A 如何互补而不是替代
 
-## 我如何评估每个 Agent 的效果
+## A2A Stable 但 Optional 的采用证据是什么
+
+## 框架和框架功能的成熟度如何分别记录
 ```
