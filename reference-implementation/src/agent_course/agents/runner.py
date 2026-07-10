@@ -142,14 +142,14 @@ class BoundedAgentRunner:
                 },
             )
 
+            if state.output_tokens > limits.max_output_tokens:
+                return StopReason.MAX_OUTPUT_TOKENS
+
             if step.content is not None:
                 assistant_message = Message(role="assistant", content=step.content)
                 state.messages.append(assistant_message)
                 state.new_messages.append(assistant_message)
                 state.final_content = step.content
-
-            if state.output_tokens > limits.max_output_tokens:
-                return StopReason.MAX_OUTPUT_TOKENS
 
             if not step.tool_calls:
                 if step.stop_reason is StopReason.TOOL_CALLS:

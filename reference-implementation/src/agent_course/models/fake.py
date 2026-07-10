@@ -80,8 +80,13 @@ class FakeModelGateway:
 
     @staticmethod
     def _has_order_tool_result(messages: list[Message]) -> bool:
+        latest_user_index = max(
+            index
+            for index, message in enumerate(messages)
+            if message.role == "user"
+        )
         return any(
             message.role == "tool"
             and message.tool_call_id == "fake-query-order-status-O1001"
-            for message in messages
+            for message in messages[latest_user_index + 1 :]
         )

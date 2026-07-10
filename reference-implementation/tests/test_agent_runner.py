@@ -353,6 +353,37 @@ async def test_session_history_continues_for_same_trusted_identity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_same_session_order_query_executes_tool_again() -> None:
+    sessions = InMemorySessionStore()
+    tool = QueryOrderStatusTool()
+    runner = BoundedAgentRunner(
+        model=FakeModelGateway(),
+        tools=ToolRegistry([tool]),
+        guardrail=DefaultGuardrail(),
+        sessions=sessions,
+    )
+    context = make_context()
+
+    first = await runner.run(
+        ORDER_QUERY_FIXTURE,
+        context,
+        make_limits(),
+        session_id="shared",
+    )
+    second = await runner.run(
+        ORDER_QUERY_FIXTURE,
+        context,
+        make_limits(),
+        session_id="shared",
+    )
+
+    assert first.stop_reason is StopReason.COMPLETED
+    assert second.stop_reason is StopReason.COMPLETED
+    assert [result.code for result in second.tool_results] == ["OK"]
+    assert tool.execution_count == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "other_context",
     [
@@ -415,7 +446,7 @@ async def test_trace_sink_never_retains_raw_tool_arguments_or_secrets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_output_token_budget_stops_run() -> None:
+async def test_output_token_budget_rejects_content_before_returning_or_persisting() -> None:
     class ExpensiveGateway:
         async def next_step(
             self,
@@ -429,10 +460,42 @@ async def test_output_token_budget_stops_run() -> None:
                 usage=ModelUsage(output_tokens=11, total_tokens=11),
             )
 
-    result = await make_runner(ExpensiveGateway()).run(
+    sessions = InMemorySessionStore()
+    traces = InMemoryTraceSink()
+    context = make_context()
+    result = await make_runner(
+        ExpensiveGateway(), sessions=sessions, traces=traces
+    ).run(
         "answer",
-        make_context(),
+        context,
         make_limits(max_output_tokens=10),
+        session_id="shared",
     )
 
     assert result.stop_reason is StopReason.MAX_OUTPUT_TOKENS
+    assert result.final_content is None
+    assert result.messages == (Message(role="user", content="answer"),)
+    assert sessions.load(SessionKey.from_context(context, "shared")) == [
+        Message(role="user", content="answer")
+    ]
+    assert [(event.event_type, event.attributes) for event in traces.for_trace(
+        result.trace_id
+    )] == [
+        ("run.started", {
+            "request_id": context.request_id,
+            "tenant_id": context.tenant_id,
+            "user_id": context.user_id,
+        }),
+        ("guardrail.checked", {"allowed": True, "code": "ALLOW"}),
+        ("model.step", {
+            "turn": 1,
+            "tool_call_count": 0,
+            "output_tokens": 11,
+            "stop_reason": StopReason.COMPLETED,
+        }),
+        ("run.finished", {
+            "stop_reason": StopReason.MAX_OUTPUT_TOKENS,
+            "message_count": 1,
+            "tool_result_count": 0,
+        }),
+    ]

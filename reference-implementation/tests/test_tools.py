@@ -4,6 +4,7 @@ from typing import get_type_hints
 import pytest
 
 from agent_course.core import RunContext, ToolResult
+from agent_course.observability.traces import InMemoryTraceSink
 from agent_course.tools.base import StrictToolArguments
 from agent_course.tools.orders import QueryOrderStatusArguments, QueryOrderStatusTool
 from agent_course.tools.registry import ToolRegistry
@@ -149,3 +150,27 @@ def test_registry_exposes_strict_tool_definition() -> None:
     assert definitions[0].name == "query_order_status"
     assert definitions[0].input_schema["additionalProperties"] is False
     assert definitions[0].input_schema["required"] == ["order_id"]
+
+
+def test_trace_sink_redacts_normalized_sensitive_key_variants() -> None:
+    traces = InMemoryTraceSink()
+    traces.record(
+        "trace-1",
+        "secret.probe",
+        {
+            "X-API-Key": "x-api-key-secret",
+            "access_token": "access-token-secret",
+            "request_id": "request-1",
+        },
+    )
+
+    attributes = traces.events[0].attributes
+
+    assert attributes == {
+        "X-API-Key": "[REDACTED]",
+        "access_token": "[REDACTED]",
+        "request_id": "request-1",
+    }
+    serialized = traces.events[0].model_dump_json()
+    assert "x-api-key-secret" not in serialized
+    assert "access-token-secret" not in serialized

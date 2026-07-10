@@ -24,6 +24,7 @@ _SENSITIVE_KEYS = frozenset(
         "tool_arguments",
     }
 )
+_SENSITIVE_KEY_SUFFIXES = tuple(f"_{key}" for key in _SENSITIVE_KEYS)
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]+"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~-]+"),
@@ -81,12 +82,19 @@ class InMemoryTraceSink:
 def _sanitize_mapping(values: Mapping[str, object]) -> dict[str, JsonValue]:
     sanitized: dict[str, JsonValue] = {}
     for key, value in values.items():
-        normalized = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
-        if normalized in _SENSITIVE_KEYS:
+        normalized = _normalize_key(key)
+        if normalized in _SENSITIVE_KEYS or normalized.endswith(
+            _SENSITIVE_KEY_SUFFIXES
+        ):
             sanitized[key] = _REDACTED
         else:
             sanitized[key] = _sanitize_value(value)
     return sanitized
+
+
+def _normalize_key(key: str) -> str:
+    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    return re.sub(r"[^a-z0-9]+", "_", separated.casefold()).strip("_")
 
 
 def _sanitize_value(value: object) -> JsonValue:
