@@ -178,7 +178,7 @@ Update all moved chapter numbers, including the corresponding README chapter hea
 - [ ] **Step 5: Run structural searches**
 
 ```bash
-rg -n '第 8 章：Agent|第 6 章：RAG|第 9 章：Workflow|第 7 章：高级 RAG|第 11 章：Agent 互操作' README.md chapters docs
+rg -n --glob '!docs/superpowers/**' '第 8 章：Agent|第 6 章：RAG|第 9 章：Workflow|第 7 章：高级 RAG|第 11 章：Agent 互操作' README.md chapters docs
 python scripts/validate_course.py
 ```
 
