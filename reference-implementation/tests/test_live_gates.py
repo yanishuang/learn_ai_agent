@@ -317,11 +317,27 @@ async def test_responses_gateway_rejects_missing_response_id(
     [
         (
             {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            r"\$\.type",
+        ),
+        (
+            {
                 "type": "object",
                 "properties": {"order_id": {"type": "string"}},
                 "required": ["order_id"],
             },
             r"\$\.additionalProperties",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {"order_id": {"type": "string"}},
+                "required": [],
+                "additionalProperties": False,
+            },
+            r"\$\.required",
         ),
         (
             {
@@ -384,88 +400,16 @@ async def test_responses_gateway_rejects_non_strict_tool_schema_before_request(
     assert client.responses.create_calls == []
 
 
-@pytest.mark.parametrize(
-    ("schema", "error_path"),
-    [
-        (
-            {
-                "type": "object",
-                "properties": {
-                    "choice": {
-                        "anyOf": [
-                            {"type": "string"},
-                            {
-                                "type": "object",
-                                "properties": {"city": {"type": "string"}},
-                                "required": [],
-                                "additionalProperties": False,
-                            },
-                        ]
-                    }
-                },
-                "required": ["choice"],
-                "additionalProperties": False,
-            },
-            r"\$\.properties\.choice\.anyOf\[1\]\.required",
-        ),
-        (
-            {
-                "type": "object",
-                "properties": {
-                    "delivery": {
-                        "allOf": [
-                            {
-                                "type": "object",
-                                "properties": {"city": {"type": "string"}},
-                                "required": [],
-                                "additionalProperties": False,
-                            }
-                        ]
-                    }
-                },
-                "required": ["delivery"],
-                "additionalProperties": False,
-            },
-            r"\$\.properties\.delivery\.allOf\[0\]\.required",
-        ),
-        (
-            {
-                "type": "object",
-                "properties": {"address": {"$ref": "#/$defs/Address"}},
-                "required": ["address"],
-                "additionalProperties": False,
-                "$defs": {
-                    "Address": {
-                        "type": "object",
-                        "properties": {"city": {"type": "string"}},
-                        "required": [],
-                        "additionalProperties": False,
-                    }
-                },
-            },
-            r"\$\.\$defs\.Address\.required",
-        ),
-        (
-            {
-                "type": "object",
-                "properties": {"address": {"$ref": "#/definitions/Address"}},
-                "required": ["address"],
-                "additionalProperties": False,
-                "definitions": {
-                    "Address": {
-                        "type": "object",
-                        "properties": {"city": {"type": "string"}},
-                        "required": [],
-                        "additionalProperties": False,
-                    }
-                },
-            },
-            r"\$\.definitions\.Address\.required",
-        ),
-    ],
-)
-@pytest.mark.asyncio
-async def test_responses_gateway_rejects_non_strict_composed_tool_schema_before_request(
+def strict_tool_schema(property_schema: dict[str, object]) -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {"value": property_schema},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+
+
+async def assert_schema_rejected_before_request(
     monkeypatch: pytest.MonkeyPatch,
     schema: dict[str, object],
     error_path: str,
@@ -489,28 +433,168 @@ async def test_responses_gateway_rejects_non_strict_composed_tool_schema_before_
 
 
 @pytest.mark.parametrize(
+    ("keyword", "value"),
+    [
+        ("allOf", [{"type": "string"}]),
+        ("oneOf", [{"type": "string"}]),
+        ("not", {"type": "string"}),
+        ("dependentRequired", {"value": ["other"]}),
+        ("dependentSchemas", {"value": {"type": "string"}}),
+        ("if", {"type": "string"}),
+        ("then", {"type": "string"}),
+        ("else", {"type": "string"}),
+        ("definitions", {}),
+        ("patternProperties", {}),
+        ("prefixItems", [{"type": "string"}]),
+        ("contains", {"type": "string"}),
+        ("propertyNames", {"type": "string"}),
+        ("unevaluatedProperties", False),
+        ("unevaluatedItems", False),
+        ("contentSchema", {"type": "string"}),
+        ("default", "value"),
+        ("examples", ["value"]),
+        ("const", "value"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_explicitly_unsupported_schema_keywords(
+    monkeypatch: pytest.MonkeyPatch,
+    keyword: str,
+    value: object,
+) -> None:
+    await assert_schema_rejected_before_request(
+        monkeypatch,
+        strict_tool_schema({keyword: value}),
+        rf"\$\.properties\.value\.{keyword}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_unknown_schema_keyword_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await assert_schema_rejected_before_request(
+        monkeypatch,
+        strict_tool_schema({"x-course-extension": True}),
+        r"\$\.properties\.value\.x-course-extension",
+    )
+
+
+@pytest.mark.parametrize(
+    ("schema", "error_path"),
+    [
+        (
+            strict_tool_schema({"anyOf": [{"default": "value"}]}),
+            r"\$\.properties\.value\.anyOf\[0\]\.default",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+                "$defs": {"Address": {"default": "value"}},
+            },
+            r"\$\.\$defs\.Address\.default",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_reports_indexed_and_named_schema_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    schema: dict[str, object],
+    error_path: str,
+) -> None:
+    await assert_schema_rejected_before_request(monkeypatch, schema, error_path)
+
+
+@pytest.mark.parametrize(
+    ("schema", "error_path"),
+    [
+        (
+            {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+                "anyOf": [],
+            },
+            r"\$\.anyOf",
+        ),
+        (strict_tool_schema({"type": "array", "items": []}), r"\.items"),
+        (strict_tool_schema({"anyOf": {}}), r"\.anyOf"),
+        (
+            {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+                "$defs": [],
+            },
+            r"\$\.\$defs",
+        ),
+        (strict_tool_schema({"$ref": 1}), r"\.\$ref"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_invalid_schema_container_shapes(
+    monkeypatch: pytest.MonkeyPatch,
+    schema: dict[str, object],
+    error_path: str,
+) -> None:
+    await assert_schema_rejected_before_request(monkeypatch, schema, error_path)
+
+
+@pytest.mark.parametrize(
     "schema",
     [
+        {
+            "type": "object",
+            "title": "Order delivery",
+            "description": "A strict nested object and array.",
+            "properties": {
+                "destinations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "city": {
+                                "type": ["string", "null"],
+                                "minLength": 1,
+                                "maxLength": 80,
+                                "pattern": ".+",
+                                "format": "hostname",
+                            },
+                            "priority": {
+                                "type": "number",
+                                "multipleOf": 0.5,
+                                "minimum": 0,
+                                "maximum": 10,
+                                "exclusiveMinimum": -1,
+                                "exclusiveMaximum": 11,
+                            },
+                        },
+                        "required": ["city", "priority"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["destinations"],
+            "additionalProperties": False,
+        },
         {
             "type": "object",
             "properties": {
                 "delivery": {
                     "anyOf": [
+                        {"type": "string", "enum": ["collect"]},
                         {
                             "type": "object",
                             "properties": {"city": {"type": "string"}},
                             "required": ["city"],
                             "additionalProperties": False,
-                        },
-                        {
-                            "allOf": [
-                                {
-                                    "type": "object",
-                                    "properties": {"postcode": {"type": "string"}},
-                                    "required": ["postcode"],
-                                    "additionalProperties": False,
-                                }
-                            ]
                         },
                     ]
                 }
@@ -520,11 +604,8 @@ async def test_responses_gateway_rejects_non_strict_composed_tool_schema_before_
         },
         {
             "type": "object",
-            "properties": {
-                "address": {"$ref": "#/$defs/Address"},
-                "recipient": {"$ref": "#/definitions/Recipient"},
-            },
-            "required": ["address", "recipient"],
+            "properties": {"address": {"$ref": "#/$defs/Address"}},
+            "required": ["address"],
             "additionalProperties": False,
             "$defs": {
                 "Address": {
@@ -534,19 +615,11 @@ async def test_responses_gateway_rejects_non_strict_composed_tool_schema_before_
                     "additionalProperties": False,
                 }
             },
-            "definitions": {
-                "Recipient": {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                    "required": ["name"],
-                    "additionalProperties": False,
-                }
-            },
         },
     ],
 )
 @pytest.mark.asyncio
-async def test_responses_gateway_accepts_valid_composed_tool_schemas(
+async def test_responses_gateway_accepts_course_supported_strict_schemas(
     monkeypatch: pytest.MonkeyPatch,
     schema: dict[str, object],
 ) -> None:
@@ -560,8 +633,7 @@ async def test_responses_gateway_accepts_valid_composed_tool_schemas(
     )
 
     await gateway.next_step(
-        messages=[Message(role="user", content="Order O1001")],
-        tools=[tool],
+        messages=[Message(role="user", content="Order O1001")], tools=[tool]
     )
 
     assert len(client.responses.create_calls) == 1
