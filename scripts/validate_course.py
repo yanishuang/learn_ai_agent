@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -98,9 +99,33 @@ def _validate_course_manifest(root: Path) -> list[str]:
     except json.JSONDecodeError:
         return ["docs/course-manifest.json: invalid JSON"]
 
+    if not isinstance(manifest, list):
+        return ["docs/course-manifest.json: manifest must be a list"]
+
     errors: list[str] = []
-    for chapter in manifest:
-        chapter_path = Path(chapter["path"])
+    for entry_number, chapter in enumerate(manifest, start=1):
+        if not isinstance(chapter, Mapping):
+            errors.append(
+                f"docs/course-manifest.json: entry {entry_number} must be an object"
+            )
+            continue
+
+        path = chapter.get("path")
+        title = chapter.get("title")
+        has_valid_path = isinstance(path, str) and bool(path.strip())
+        has_valid_title = isinstance(title, str) and bool(title.strip())
+        if not has_valid_path:
+            errors.append(
+                f"docs/course-manifest.json: entry {entry_number} path must be a non-empty string"
+            )
+        if not has_valid_title:
+            errors.append(
+                f"docs/course-manifest.json: entry {entry_number} title must be a non-empty string"
+            )
+        if not has_valid_path or not has_valid_title:
+            continue
+
+        chapter_path = Path(path)
         chapter_file = root / chapter_path
         if not chapter_file.is_file():
             errors.append(
@@ -108,8 +133,8 @@ def _validate_course_manifest(root: Path) -> list[str]:
             )
             continue
 
-        expected_heading = f"# {chapter['title']}"
-        headings = chapter_file.read_text(encoding="utf-8").splitlines()
+        expected_heading = f"# {title}"
+        headings = _lines_outside_fenced_code_blocks(chapter_file)
         if expected_heading not in headings:
             errors.append(
                 f"{chapter_path.as_posix()}: expected top-level heading {expected_heading}"
@@ -124,13 +149,17 @@ def _validate_ecosystem_maturity(root: Path) -> list[str]:
 
     lines = matrix_file.read_text(encoding="utf-8").splitlines()
     header_index = next(
-        (index for index, line in enumerate(lines) if "Maturity" in _table_cells(line)),
+        (index for index, line in enumerate(lines) if _table_cells(line)),
         None,
     )
     if header_index is None:
         return []
 
-    maturity_index = _table_cells(lines[header_index]).index("Maturity")
+    header_cells = _table_cells(lines[header_index])
+    if "Maturity" not in header_cells:
+        return ["docs/ecosystem-maturity.md: missing Maturity column"]
+
+    maturity_index = header_cells.index("Maturity")
     errors: list[str] = []
     for line_number, line in enumerate(lines[header_index + 1 :], start=header_index + 2):
         cells = _table_cells(line)
