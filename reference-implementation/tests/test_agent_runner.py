@@ -91,6 +91,14 @@ async def test_normal_order_fixture_calls_tool_then_finishes() -> None:
 
     assert result.stop_reason is StopReason.COMPLETED
     assert result.final_content == "订单 O1001 当前状态为 shipped。"
+    assert result.model_tool_calls == (
+        ToolCall(
+            id="fake-query-order-status-O1001",
+            name="query_order_status",
+            arguments={"order_id": "O1001"},
+        ),
+    )
+    assert result.model_turn_count == 2
     assert [tool_result.code for tool_result in result.tool_results] == ["OK"]
     assert [message.role for message in result.messages] == ["user", "tool", "assistant"]
 
@@ -141,6 +149,7 @@ async def test_runner_stops_at_max_turns() -> None:
     )
 
     assert result.stop_reason is StopReason.MAX_TURNS
+    assert result.model_turn_count == 2
     assert len(result.tool_results) == 2
 
 
@@ -165,6 +174,7 @@ async def test_runner_enforces_asyncio_timeout() -> None:
 
     assert result.stop_reason is StopReason.TIMEOUT
     assert result.final_content is None
+    assert result.model_turn_count == 1
 
 
 @pytest.mark.asyncio

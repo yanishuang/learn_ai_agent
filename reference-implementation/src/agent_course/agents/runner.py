@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from agent_course.agents.guardrails import DefaultGuardrail, Guardrail
 from agent_course.agents.sessions import InMemorySessionStore, SessionKey
@@ -31,6 +31,8 @@ class AgentResult(FrozenModel):
     final_content: str | None = None
     stop_reason: StopReason
     messages: tuple[Message, ...]
+    model_tool_calls: tuple[ToolCall, ...]
+    model_turn_count: int = Field(ge=0)
     tool_results: tuple[ToolResult, ...]
     trace_id: str
     continuation: ModelContinuation | None = None
@@ -40,12 +42,14 @@ class AgentResult(FrozenModel):
 class _RunState:
     messages: list[Message]
     new_messages: list[Message]
+    model_tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
     seen_tool_calls: set[str] = field(default_factory=set)
     continuation: ModelContinuation | None = None
     final_content: str | None = None
     output_tokens: int = 0
-    tool_calls: int = 0
+    model_turn_count: int = 0
+    executed_tool_calls: int = 0
 
 
 @dataclass(slots=True)
@@ -124,12 +128,16 @@ class BoundedAgentRunner:
     ) -> StopReason:
         model_input = list(state.messages)
         for turn in range(1, limits.max_turns + 1):
+            state.model_turn_count += 1
             step = await self.model.next_step(
                 model_input,
                 self.tools.definitions(),
                 continuation=state.continuation,
             )
             state.continuation = step.continuation
+            state.model_tool_calls.extend(
+                call.model_copy(deep=True) for call in step.tool_calls
+            )
             state.output_tokens += step.usage.output_tokens
             self.traces.record(
                 trace_id,
@@ -197,11 +205,11 @@ class BoundedAgentRunner:
         )
         if fingerprint in state.seen_tool_calls:
             return StopReason.REPEATED_TOOL_CALL
-        if state.tool_calls >= limits.max_tool_calls:
+        if state.executed_tool_calls >= limits.max_tool_calls:
             return StopReason.MAX_TOOL_CALLS
 
         state.seen_tool_calls.add(fingerprint)
-        state.tool_calls += 1
+        state.executed_tool_calls += 1
         result = await self.tools.execute(call.name, call.arguments, context)
         result = result.model_copy(update={"call_id": call.id})
         state.tool_results.append(result)
@@ -250,6 +258,8 @@ class BoundedAgentRunner:
             final_content=state.final_content,
             stop_reason=stop_reason,
             messages=tuple(state.messages),
+            model_tool_calls=tuple(state.model_tool_calls),
+            model_turn_count=state.model_turn_count,
             tool_results=tuple(state.tool_results),
             trace_id=trace_id,
             continuation=state.continuation,

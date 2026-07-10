@@ -90,13 +90,16 @@ def build_offline_course_application() -> CourseApplication:
 
 
 def default_run_context() -> RunContext:
-    """Return server-owned demo identity; production hosts replace this dependency."""
+    """Fail closed until the host injects a trusted request identity provider.
 
-    return RunContext(
-        user_id="api-demo-user",
-        tenant_id="tenant-1",
-        request_id="api-demo-request",
-        permissions=frozenset({"orders:read"}),
+    This dependency is deliberately not an authentication implementation. A host must
+    derive ``RunContext`` from its authenticated, request-scoped server identity and
+    pass that provider to ``create_app``.
+    """
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="trusted identity provider is not configured",
     )
 
 

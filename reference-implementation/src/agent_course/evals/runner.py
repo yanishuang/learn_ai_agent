@@ -1,7 +1,6 @@
 """Deterministic offline evaluation models and runner."""
 
 import json
-from collections.abc import Mapping
 from typing import Protocol
 
 from pydantic import ConfigDict, Field, JsonValue, field_validator
@@ -61,11 +60,11 @@ class EvalReport(EvalModel):
     total_cases: int = Field(ge=0)
     passed_cases: int = Field(ge=0)
     failed_cases: int = Field(ge=0)
-    task_success_rate: float = Field(ge=0, le=1)
-    tool_selection_accuracy: float = Field(ge=0, le=1)
-    argument_accuracy: float = Field(ge=0, le=1)
-    unauthorized_action_block_rate: float = Field(ge=0, le=1)
-    average_turn_count: float = Field(ge=0)
+    task_success_rate: float | None = Field(ge=0, le=1)
+    tool_selection_accuracy: float | None = Field(ge=0, le=1)
+    argument_accuracy: float | None = Field(ge=0, le=1)
+    unauthorized_action_block_rate: float | None = Field(ge=0, le=1)
+    average_turn_count: float | None = Field(ge=0)
     results: tuple[EvalCaseResult, ...] = ()
 
     def to_json(self) -> str:
@@ -120,7 +119,7 @@ async def evaluate_cases(
         average_turn_count=(
             round(sum(result.turn_count for result in results) / len(results), 4)
             if results
-            else 0.0
+            else None
         ),
         results=tuple(results),
     )
@@ -135,9 +134,7 @@ def _evaluate_case(case: EvalCase, outcome: AgentResult) -> EvalCaseResult:
     tool_selection_correct = _tool_selection_correct(case, outcome)
     arguments_correct = _arguments_correct(case, outcome)
     unauthorized_action_blocked = _unauthorized_action_blocked(case, outcome)
-    turn_count = sum(
-        message.role in {"assistant", "tool"} for message in outcome.messages
-    )
+    turn_count = outcome.model_turn_count
     turn_count_within_limit = turn_count <= case.max_turns
 
     checks = (
@@ -166,20 +163,18 @@ def _evaluate_case(case: EvalCase, outcome: AgentResult) -> EvalCaseResult:
 def _tool_selection_correct(case: EvalCase, outcome: AgentResult) -> bool:
     if case.expected_tool_name is None:
         return True
-    selected = [result.name for result in outcome.tool_results]
+    selected = [call.name for call in outcome.model_tool_calls]
     return selected == [case.expected_tool_name]
 
 
 def _arguments_correct(case: EvalCase, outcome: AgentResult) -> bool:
     if case.expected_tool_arguments is None:
         return True
-    for result in outcome.tool_results:
-        if result.name != case.expected_tool_name:
+    for call in outcome.model_tool_calls:
+        if call.name != case.expected_tool_name:
             continue
-        if not isinstance(result.output, Mapping):
-            return False
         return all(
-            result.output.get(key) == value
+            call.arguments.get(key) == value
             for key, value in case.expected_tool_arguments.items()
         )
     return False
@@ -195,8 +190,8 @@ def _unauthorized_action_blocked(case: EvalCase, outcome: AgentResult) -> bool:
     return denied and not any(result.success for result in outcome.tool_results)
 
 
-def _rate(values: list[bool]) -> float:
-    return round(sum(values) / len(values), 4) if values else 1.0
+def _rate(values: list[bool]) -> float | None:
+    return round(sum(values) / len(values), 4) if values else None
 
 
 __all__ = [

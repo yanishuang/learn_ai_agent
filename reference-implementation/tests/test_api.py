@@ -5,9 +5,16 @@ from fastapi.testclient import TestClient
 from agent_course.agents.guardrails import DefaultGuardrail
 from agent_course.agents.runner import BoundedAgentRunner
 from agent_course.agents.sessions import InMemorySessionStore
+from agent_course.api.app import app as default_app
 from agent_course.api.app import create_app
 from agent_course.application import CourseApplication
-from agent_course.core import RunContext
+from agent_course.core import (
+    Message,
+    ModelContinuation,
+    ModelStep,
+    RunContext,
+    ToolDefinition,
+)
 from agent_course.models.fake import ORDER_QUERY_FIXTURE, FakeModelGateway
 from agent_course.observability.traces import InMemoryTraceSink
 from agent_course.tools.orders import QueryOrderStatusTool
@@ -87,8 +94,26 @@ def test_health_does_not_require_credentials_or_network() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_default_api_composition_uses_the_offline_fake_path() -> None:
-    with TestClient(create_app()) as client:
+def test_exported_default_app_requires_an_injected_trusted_identity() -> None:
+    with TestClient(default_app) as client:
+        health = client.get("/health")
+        create_response = client.post(
+            "/v1/agent/runs",
+            json={"question": ORDER_QUERY_FIXTURE},
+        )
+        get_response = client.get("/v1/agent/runs/unavailable")
+        events_response = client.get("/v1/agent/runs/unavailable/events")
+
+    assert health.status_code == 200
+    for response in (create_response, get_response, events_response):
+        assert response.status_code == 503
+        assert response.json() == {
+            "detail": "trusted identity provider is not configured"
+        }
+
+
+def test_offline_default_composition_uses_fake_with_injected_identity() -> None:
+    with TestClient(create_app(context_provider=make_context)) as client:
         response = client.post(
             "/v1/agent/runs",
             json={"question": ORDER_QUERY_FIXTURE},
@@ -97,7 +122,7 @@ def test_default_api_composition_uses_the_offline_fake_path() -> None:
     assert response.status_code == 201
     output = response.json()["result"]["tool_results"][0]["output"]
     assert output["tenant_id"] == "tenant-1"
-    assert output["requested_by"] == "api-demo-user"
+    assert output["requested_by"] == "api-user"
 
 
 def test_create_get_and_events_use_fake_model_and_trusted_context() -> None:
@@ -184,3 +209,50 @@ def test_run_lookup_is_isolated_by_trusted_tenant_and_user() -> None:
 
     assert hidden.status_code == 404
     assert hidden_events.status_code == 404
+
+
+def test_separate_clients_cannot_fetch_runs_or_share_sessions() -> None:
+    class RecordingGateway:
+        def __init__(self) -> None:
+            self.calls: list[list[Message]] = []
+
+        async def next_step(
+            self,
+            messages: list[Message],
+            tools: list[ToolDefinition],
+            *,
+            continuation: ModelContinuation | None = None,
+        ) -> ModelStep:
+            self.calls.append(messages)
+            return ModelStep(content=f"answer-{len(self.calls)}")
+
+    model = RecordingGateway()
+    application = make_course_application()
+    application.agent_runner.model = model
+    first_api = create_app(
+        course_application=application,
+        context_provider=lambda: make_context(user_id="first-user"),
+    )
+    second_api = create_app(
+        course_application=application,
+        context_provider=lambda: make_context(user_id="second-user"),
+    )
+
+    with TestClient(first_api) as first_client, TestClient(second_api) as second_client:
+        first = first_client.post(
+            "/v1/agent/runs",
+            json={"question": "first", "session_id": "same-session"},
+        )
+        hidden = second_client.get(f"/v1/agent/runs/{first.json()['run_id']}")
+        second = second_client.post(
+            "/v1/agent/runs",
+            json={"question": "second", "session_id": "same-session"},
+        )
+
+    assert first.status_code == 201
+    assert hidden.status_code == 404
+    assert second.status_code == 201
+    assert model.calls == [
+        [Message(role="user", content="first")],
+        [Message(role="user", content="second")],
+    ]
