@@ -1,954 +1,439 @@
 # 第 1 章：AI Agent 全景与学习路线
 
-更新时间：2026-07-09
-建议学习时间：1-2 天  
-适合阶段：开始学习 AI Agent 前的第一个完整学习单元  
-本章产出：一份 Agent 概念笔记、一张系统架构图、一份场景分类表、一份 12 周个人学习计划
+更新时间：2026-07-10<br>
+建议学习时间：1-2 天<br>
+适合阶段：开始学习 AI Agent 前的第一个完整学习单元<br>
+本章产出：一张五轴决策卡、一张组合式系统架构图、一份场景判断记录、一份可运行证据清单
 
 ## 1.1 本章学习目标
 
-学完本章后，你应该能够独立回答下面 8 个问题：
+学完本章后，你应该能够独立完成下面 8 件事：
 
-1. AI Agent 和普通聊天机器人有什么区别？
-2. RAG 应用、Workflow、Agent、多 Agent 分别适合解决什么问题？
-3. 一个 Agent 系统通常由哪些部分组成？
-4. 为什么企业项目里不能一上来就追求“完全自主 Agent”？
-5. MCP 在 Agent 系统里解决的是哪一层问题？
-6. Know-Engine 和 Dodo-Agent 这两个课程项目分别对应什么能力？
-7. 面对一个业务需求时，如何判断该用 RAG、Workflow 还是 Agent？
-8. 接下来 12 周应该按什么顺序学习，才不容易变成只会调框架 API？
+1. 解释普通模型调用、RAG、工具、Workflow、Agent 和多 Agent 的职责边界。
+2. 不再把 RAG、Workflow、Agent 当成互斥选项，而是把它们组合成系统层。
+3. 用知识、动作、路径、状态、风险五个轴分析业务需求。
+4. 说明为什么真实身份、权限、预算和审批不能交给模型决定。
+5. 把方案判断映射到课程离线参考实现中的可运行模块和测试。
+6. 区分课程的确定性离线基线与需要额外基础设施的生产扩展。
+7. 解释 MCP 在工具接入层的位置，以及它不能替代的业务治理能力。
+8. 为一个场景给出最小可验证方案，而不是直接选择“最自主”的方案。
 
-本章不要求你马上写代码，但要求你完成设计、判断和拆解练习。AI Agent 学习的第一个门槛不是框架，而是分清楚“问题类型”和“系统边界”。
+本章不要求你马上写完整 Agent，但要求每个架构判断都能回答两个问题：它由哪个边界负责？你准备用什么证据证明它有效？
 
 ## 1.2 学前准备
 
-### 你需要具备的基础
+你需要会阅读 Python Web 项目代码，理解 HTTP、JSON、数据库、缓存和消息队列等基础概念，并能使用 Markdown 记录判断。Go 不是本章前置条件。
 
-- 会阅读 Python Web 项目代码，理解 FastAPI 这类后端框架的基本结构。
-- 了解 Go 更好，但不是本课程前 12 周的必要条件。
-- 理解 HTTP API、数据库、缓存、消息队列、对象存储这些后端基础概念。
-- 知道大模型可以根据 prompt 生成文本，但不要求已经熟悉模型 API。
-- 能使用 Markdown 记录学习笔记。
+先按 [参考实现 README](../reference-implementation/README.md) 完成离线环境同步。后文出现的 `uv run pytest` 命令都从 `reference-implementation/` 目录执行，默认不需要 API Key，也不会调用真实模型。
 
-### 本章建议创建的学习文件
-
-可以在自己的学习目录中创建下面 4 个文件：
+建议创建下面 4 个学习文件：
 
 ```text
-notes/chapter-01-agent-concepts.md
+notes/chapter-01-five-axis-card.md
 notes/chapter-01-scenario-classification.md
 notes/chapter-01-system-architecture.md
-notes/chapter-01-12-week-plan.md
+notes/chapter-01-evidence.md
 ```
 
-如果你后面要把学习过程放进仓库，也可以建立类似结构：
+## 1.3 先建立组合式全景图
 
-```text
-learning-notes/
-  chapter-01/
-    agent-concepts.md
-    scenario-classification.md
-    system-architecture.md
-    12-week-plan.md
-```
-
-## 1.3 先建立一张全景图
-
-AI Agent 不是单个技术点，而是一类系统设计方式。它通常把大模型、工具、上下文、数据、记忆、执行循环、评估和权限组合在一起，让系统能够围绕一个目标持续完成任务。
-
-可以先用下面这张图建立直觉：
+AI Agent 不是一个替代所有架构的盒子。更实用的理解是：普通模型调用之上，可以按需要组合知识、动作、流程和开放决策能力；状态、权限、预算、审批和 trace 则由应用持续治理。
 
 ```mermaid
 flowchart TD
-    User["用户目标 / 任务"] --> App["AI 应用入口"]
-    App --> Agent["Agent 执行器"]
-    Agent --> LLM["大模型"]
-    Agent --> Context["上下文 / 记忆"]
-    Agent --> Tools["工具系统"]
-    Agent --> Knowledge["知识与数据"]
-    Tools --> APIs["业务 API"]
-    Tools --> DB["数据库"]
-    Tools --> MCP["MCP Server"]
-    Knowledge --> RAG["RAG 检索链路"]
-    Agent --> Trace["日志 / 追踪 / 评估"]
-    Agent --> Result["最终结果"]
+    User["用户目标"] --> App["应用边界"]
+    App --> Prompt["Prompt 与结构化输入输出"]
+    App --> Knowledge["知识层：RAG"]
+    App --> Action["动作层：Tools / MCP"]
+    App --> Path["路径层：Workflow / Agent"]
+    App --> State["状态层：Run / Session / Durable State"]
+    App --> Control["治理层：权限 / 预算 / 审批 / Trace / Evals"]
+    Path --> Model["Model Gateway"]
+    Path --> Knowledge
+    Path --> Action
+    State --> Path
+    Control --> Knowledge
+    Control --> Action
+    Control --> Path
 ```
 
-这张图背后的核心思想是：
+这张图有四个关键结论：
 
-- 大模型负责理解、生成、推理和决策，但不应该直接拥有真实业务权限。
-- 工具负责执行动作，例如查询订单、搜索知识库、读取文件、调用内部系统。
-- RAG 负责把外部知识安全、可追溯地提供给模型。
-- MCP 负责用标准协议把工具和资源暴露给模型应用。
-- 评估和追踪负责让每一次模型回答、工具调用和失败原因可检查。
+- RAG 提供知识，不自动产生业务动作。
+- Tool Calling 提供动作，不自动决定完整路径。
+- Workflow 固定或约束路径，局部节点仍可使用 RAG、工具或 Agent。
+- Agent 在边界内动态选择下一步；身份、权限、预算和最终副作用仍属于应用。
 
-学习 Agent 时，不要只盯着“模型有多聪明”。真正的工程能力在于：你能否把模型限制在一个可控系统里，让它正确使用数据、工具和流程。
+课程离线参考实现已经把这些边界拆开：`ModelGateway` 负责下一步模型结果，`InMemoryRetriever` 负责授权后的检索，`ToolRegistry` 负责工具分发，`BoundedAgentRunner` 负责有界循环，`ResearchWorkflow` 负责版本化状态与审批。它们可以组合，不要求只能选一个。
 
-## 1.4 核心概念一：什么是 AI Agent
+> **课程离线基线**：Fake Model、内存检索器、内存会话和 trace、确定性 Workflow，用于学习合同和回归测试。<br>
+> **生产扩展**：真实模型、持久化数据库、队列、外部搜索、集中式策略、密钥管理和监控。生产扩展不是本章默认命令的隐含能力。
 
-在工程语境里，可以把 AI Agent 理解为：
+## 1.4 什么是 AI Agent
 
-> 一个以大模型为核心决策组件，能够基于目标、上下文和工具，进行多步推理、行动、观察和调整的软件系统。
+在本课程的工程语境里，可以把 Agent 理解为：
 
-它不是单次问答，而是一个执行过程。
+> 一个由应用控制边界、由模型在边界内选择下一步、能够使用上下文和工具完成多步任务的运行过程。
 
-一个最小 Agent 通常包含 6 个部分：
+“自主”不是无限权限。最小 Agent 通常包含下面 7 个部分：
 
-| 组成 | 作用 | 例子 |
+| 组成 | 职责 | 课程合同 |
 | --- | --- | --- |
-| Instructions | 告诉 Agent 角色、目标、约束和输出格式 | 你是企业知识库助手，只能基于检索资料回答 |
-| Model | 负责理解、推理、规划和生成 | GPT、Claude、DeepSeek、Qwen、Llama 等 |
-| Tools | Agent 可以调用的外部能力 | 搜索知识库、查数据库、发起 HTTP 请求 |
-| Context | 当前任务需要的上下文 | 用户问题、会话历史、用户权限、工具返回 |
-| Memory | 可跨轮次或跨任务保存的信息 | 用户偏好、历史摘要、长期知识 |
-| Run Loop | 多步执行循环 | 思考 -> 调工具 -> 观察结果 -> 决定下一步 |
+| Instructions | 描述任务、可用能力和输出要求 | `Message` |
+| Model | 产生回答或请求工具调用 | `ModelGateway.next_step(...)` |
+| Tools | 执行受校验、受授权的外部动作 | `ToolRegistry.execute(...)` |
+| Context | 携带可信身份、权限和请求信息 | `RunContext` |
+| State | 保存消息、会话或可恢复运行状态 | `SessionKey`、Workflow state |
+| Run Loop | 在模型和工具之间推进，并设置停止条件 | `BoundedAgentRunner` |
+| Evidence | 记录结果、停止原因、工具结果和 trace | `AgentResult`、`InMemoryTraceSink` |
 
-### Agent 的典型执行过程
-
-```text
-用户提出目标
-  -> Agent 理解目标
-  -> 判断是否需要工具
-  -> 如果需要，选择工具并生成参数
-  -> 应用程序执行工具
-  -> 工具结果返回给 Agent
-  -> Agent 判断是否已经完成
-  -> 如果未完成，继续下一轮
-  -> 输出最终答案或执行结果
-```
-
-### 一个具体例子
-
-用户说：
+典型执行过程是：
 
 ```text
-帮我分析一下 Q1 销售数据，找出增长最快的产品，并生成一段汇报摘要。
+接收用户目标
+  -> 应用构造可信 RunContext
+  -> 输入 guardrail 检查
+  -> 模型返回最终内容或结构化工具调用
+  -> 应用校验参数并检查权限
+  -> 应用执行工具并记录脱敏结果
+  -> 模型基于新结果继续，或运行器因预算停止
+  -> 返回带 stop_reason 和 trace_id 的 AgentResult
 ```
 
-普通聊天机器人可能直接猜一个答案。Agent 应该做的是：
+例如“查询订单 O1001”并不需要开放式研究 Agent。课程 Fake Model 会产生 `query_order_status` 调用，模型可见参数只有 `{"order_id": "O1001"}`；租户、用户和 `orders:read` 权限来自可信 `RunContext`。这是一层工具调用加一个有界循环，不等于给模型订单系统权限。
 
-1. 判断需要查询销售数据。
-2. 调用 `query_sales_data` 工具。
-3. 检查返回结果是否包含 Q1 和产品维度。
-4. 如果缺少同比数据，再调用 `query_sales_growth` 工具。
-5. 根据结果计算增长最快的产品。
-6. 生成汇报摘要。
-7. 返回数据来源和分析过程。
+## 1.5 RAG、Tools、Workflow、Agent 是可组合层
 
-这就是 Agent 和普通问答的差别：Agent 不只是回答，它会围绕目标采取行动。
+旧式分类常问“这个需求到底是 RAG 还是 Agent”。更准确的问题是：这个需求需要哪些层，每一层承担什么责任？
 
-## 1.5 核心概念二：Chatbot、RAG、Workflow、Agent、多 Agent 的区别
+| 层 | 回答的问题 | 可以单独使用吗 | 常见组合 |
+| --- | --- | --- | --- |
+| 结构化模型调用 | 如何理解或生成内容 | 可以 | 分类、抽取、摘要 |
+| RAG | 回答需要哪些外部知识 | 可以 | RAG + 引用；Agent + RAG |
+| Tools | 是否需要读取或改变外部系统 | 可以 | Workflow + Tools；Agent + Tools |
+| Workflow | 哪些步骤和状态转换应预先确定 | 可以 | Workflow + RAG + Tools |
+| Agent | 哪些局部路径需要根据观察动态决定 | 可以，但必须有边界 | Workflow 包住 Agent 节点 |
+| 多 Agent | 是否真的需要多个独立职责和上下文边界 | 很少作为第一步 | 主 Workflow + 专门 Agent |
 
-初学者最容易混淆这几个概念。本章先给出一个实用判断表。
+几个反例能帮助你摆脱互斥思维：
 
-| 类型 | 主要能力 | 自主性 | 适合场景 | 典型风险 |
-| --- | --- | --- | --- | --- |
-| Chatbot | 对话与文本生成 | 低 | FAQ、陪聊、写作辅助 | 容易幻觉，不能可靠使用私有数据 |
-| RAG 应用 | 基于外部知识回答 | 低到中 | 企业知识库、制度问答、文档问答 | 检索不到、引用不准、权限过滤缺失 |
-| Workflow | 按固定步骤执行 | 中 | 审批、报告生成、数据分析流水线 | 灵活性较低，流程设计成本高 |
-| Agent | 自主选择工具并多步完成任务 | 中到高 | 深度研究、开放式问题、复杂任务执行 | 不稳定、成本高、循环调用、权限风险 |
-| 多 Agent | 多个 Agent 分工协作 | 高 | 研究、写作、审查、PPT 生成、复杂办公自动化 | 协作成本高，责任边界不清 |
+- 企业制度问答可以是“RAG + 结构化输出”，不需要 Agent 循环。
+- 查询订单可以是“一次 Tool Calling”，不需要 RAG，也不需要开放路径。
+- 生成销售日报可以由 Workflow 固定数据读取、校验、摘要和发布步骤，其中摘要节点使用模型。
+- 深度研究可以由 Workflow 固定“收集、审阅、批准、发布”的大阶段，在收集阶段让 Agent 动态搜索。
+- 高风险退款即使使用 Agent 收集证据，执行退款仍应由确定性策略和人工审批控制。
 
-### 判断原则
+因此，架构复杂度应该按证据逐层增加：先证明单次调用，再证明检索或工具，再证明固定流程，最后才证明开放式循环确有收益。
 
-当你看到一个业务需求时，可以这样判断：
+## 1.6 五轴决策卡
 
-1. **只是通用聊天或写作**：优先 Chatbot。
-2. **主要问题是“基于资料回答”**：优先 RAG。
-3. **步骤明确、结果要求稳定、失败成本高**：优先 Workflow。
-4. **任务开放、步骤不固定、需要模型判断下一步**：考虑 Agent。
-5. **任务明显包含多个角色和专业分工**：考虑多 Agent，但要谨慎。
+面对需求时，不用互斥决策树，改用下面五个轴同时描述。
 
-### 练习 1：给场景分类
+```text
+Knowledge: public / private / real-time
+Action: none / read / write / irreversible
+Path: fixed / branching / open-ended
+State: one-shot / session / durable
+Risk: low / controlled / high
+```
 
-把下面 10 个需求分别归类为 Chatbot、RAG、Workflow、Agent 或多 Agent，并写出理由。
+### 轴一：Knowledge，知识来源
 
-| 场景 | 推荐类型 | 理由 |
+| 取值 | 含义 | 常见实现 |
 | --- | --- | --- |
-| 员工问“公司年假制度是什么？” |  |  |
-| 用户上传合同，要求指出风险条款 |  |  |
-| 每天早上自动生成销售日报 |  |  |
-| 帮我调研 5 家竞品并输出对比报告 |  |  |
-| 根据用户问题查询订单状态 |  |  |
-| 自动生成一份 20 页融资路演 PPT |  |  |
-| 回答产品说明书中的安装步骤 |  |  |
-| 根据异常日志定位可能原因并建议修复步骤 |  |  |
-| 审批一笔退款申请 |  |  |
-| 对一个研究主题进行搜索、阅读、总结、复核 |  |  |
+| public | 模型已有常识或公开输入足够 | 普通模型调用；必要时显式 Web 工具 |
+| private | 依赖企业或用户私有资料 | 授权过滤后的 RAG |
+| real-time | 依赖此刻的业务状态 | 只读工具、数据库/API 查询 |
 
-参考答案不是唯一的。重点是你能解释为什么。
+知识轴决定“给模型什么证据”。私有知识不是把所有文档塞进 prompt；实时知识也不应靠模型参数中的旧知识猜测。
 
-## 1.6 核心概念三：RAG 是什么，解决什么问题
+### 轴二：Action，动作副作用
 
-RAG 是 Retrieval-Augmented Generation，通常翻译为“检索增强生成”。它解决的是：大模型本身不知道、记不准、不能直接访问的外部知识，如何可靠地提供给模型。
-
-企业里最常见的问题不是模型不会说话，而是模型没有你的企业数据。RAG 的目标就是把企业文档、知识库、制度、产品手册、报表等资料接入回答过程。
-
-### RAG 的基本流程
-
-```mermaid
-flowchart LR
-    A["文档上传"] --> B["文档解析"]
-    B --> C["切片 Chunking"]
-    C --> D["向量化 Embedding"]
-    D --> E["向量库 / 索引"]
-    Q["用户问题"] --> R["检索 Retriever"]
-    E --> R
-    R --> P["组装上下文"]
-    P --> L["大模型生成答案"]
-    L --> O["答案 + 引用来源"]
-```
-
-### RAG 适合什么
-
-- 企业制度问答。
-- 产品手册问答。
-- 研发文档问答。
-- 法务/合同条款检索。
-- 客服知识库。
-- 内部培训资料问答。
-
-### RAG 不适合什么
-
-- 需要主动执行很多动作的复杂任务。
-- 需要长期规划和动态调整的任务。
-- 需要实时操作外部系统的任务。
-- 单靠检索资料无法完成的业务审批或决策。
-
-### RAG 的工程关键点
-
-| 问题 | 为什么重要 |
-| --- | --- |
-| 文档解析 | PDF、Word、Excel、网页结构不同，解析质量直接影响答案 |
-| 切片策略 | 切太碎会丢上下文，切太大检索不准 |
-| 检索策略 | 只靠向量检索不一定够，企业场景常需要全文检索和元数据过滤 |
-| 权限过滤 | 用户只能看到自己有权限的文档 |
-| 引用溯源 | 企业应用必须知道答案来自哪里 |
-| 评估 | 需要知道检索是否命中、答案是否忠实于资料 |
-
-本课程的 Know-Engine 项目就是围绕 RAG 展开。
-
-## 1.7 核心概念四：Workflow 是什么，为什么重要
-
-Workflow 是工作流。它不是让模型自由发挥，而是把任务拆成明确步骤，每一步都有输入、输出和状态。
-
-例如“生成销售日报”可以设计为：
-
-```text
-读取昨日销售数据
-  -> 校验数据完整性
-  -> 计算核心指标
-  -> 生成趋势分析
-  -> 生成风险提示
-  -> 输出日报
-  -> 发送给指定群组
-```
-
-这里模型可能只负责“生成趋势分析”和“写自然语言摘要”，但整个流程不是由模型随意决定的。
-
-### Workflow 的优势
-
-- 稳定，步骤清楚。
-- 容易测试和回放。
-- 容易做权限和审计。
-- 成本更可控。
-- 适合生产环境。
-
-### Workflow 的不足
-
-- 灵活性不如 Agent。
-- 流程设计需要先验经验。
-- 遇到开放问题时可能需要大量分支。
-
-### 什么时候优先 Workflow
-
-如果一个任务满足下面任意条件，优先考虑 Workflow：
-
-- 业务步骤明确。
-- 输出格式固定。
-- 需要审批或人工确认。
-- 错误成本高。
-- 需要审计和合规。
-- 需要稳定重复执行。
-
-### 练习 2：把 Agent 任务改成 Workflow
-
-选择一个你感兴趣的任务，例如“生成竞品分析报告”，尝试拆成 Workflow：
-
-```text
-任务名称：
-
-步骤 1：
-输入：
-输出：
-失败处理：
-
-步骤 2：
-输入：
-输出：
-失败处理：
-
-步骤 3：
-输入：
-输出：
-失败处理：
-```
-
-完成后思考：哪些步骤必须固定？哪些步骤可以交给 Agent 自主判断？
-
-## 1.8 核心概念五：Agent 是什么，什么时候值得用
-
-Agent 的价值在于处理“开放、动态、多步骤”的任务。它可以根据当前观察结果决定下一步，而不是完全按照固定流程执行。
-
-### Agent 适合的任务特征
-
-- 用户目标明确，但执行路径不确定。
-- 需要根据中间结果调整下一步。
-- 需要在多个工具之间选择。
-- 需要多轮搜索、阅读、比较和总结。
-- 允许一定探索成本。
-
-例如：
-
-```text
-帮我调研一家公司的 AI 产品战略，整理成一页高管简报。
-```
-
-这个任务可能需要：
-
-- 搜索官网。
-- 查新闻。
-- 查产品文档。
-- 对比竞品。
-- 提炼战略重点。
-- 过滤不可靠信息。
-- 组织成高管简报。
-
-很难提前把每一步写死，因此适合 Agent 或 Agent + Workflow 混合模式。
-
-### Agent 不适合的任务特征
-
-- 一步查询就能解决。
-- 规则固定，不需要模型判断。
-- 失败代价高，例如自动转账、自动删除数据。
-- 强合规场景，需要确定性流程。
-- 用户不允许系统自主调用外部工具。
-
-### Agent 的风险
-
-| 风险 | 表现 | 应对方式 |
+| 取值 | 含义 | 最低控制 |
 | --- | --- | --- |
-| 工具误用 | 选择了错误工具或传错参数 | 工具描述清晰、参数校验、权限检查 |
-| 循环调用 | 一直搜索、一直重试 | 最大轮数、超时、预算限制 |
-| 上下文膨胀 | 塞入太多历史和工具结果 | 摘要、裁剪、结构化上下文 |
-| 成本失控 | 多轮调用导致 token 和费用飙升 | 预算、缓存、小模型路由 |
-| 幻觉行动 | 没有证据却执行或回答 | 强制引用、工具结果校验、人类确认 |
-| 权限越界 | 访问不该访问的数据 | 后端权限系统，不依赖 prompt |
+| none | 只生成或分析 | 输出 schema、事实验证 |
+| read | 读取外部系统 | 身份、权限、租户过滤、最小字段 |
+| write | 改变可恢复状态 | 校验、幂等、审计、重试分类 |
+| irreversible | 删除、付款、发布等难以撤销动作 | 服务端策略、内容绑定审批、人工确认 |
 
-本课程的原则是：先让系统可控，再逐步增加自主性。
+动作轴决定“模型建议”与“应用执行”的分界。Prompt 中写“不要越权”只能影响模型行为，`RunContext.require(...)`、参数模型和审批状态才是可执行控制。
 
-## 1.9 核心概念六：多 Agent 是什么
+### 轴三：Path，执行路径
 
-多 Agent 是把复杂任务拆给多个不同职责的 Agent 协作完成。每个 Agent 有自己的角色、工具和输出边界。
-
-例如 Dodo-Agent 可以包含：
-
-| Agent | 职责 | 主要工具 |
+| 取值 | 含义 | 推荐起点 |
 | --- | --- | --- |
-| 智能问答 Agent | 回答开放问题，必要时搜索网页 | WebSearch、ReAct |
-| 文件问答 Agent | 基于上传文件问答 | File RAG、文档解析 |
-| 深度研究 Agent | 多轮搜索、阅读、总结、复核 | 搜索、网页读取、报告生成 |
-| PPT 生成 Agent | 生成大纲、页面结构、内容草稿 | PPT Builder、文件导出 |
-| 审查 Agent | 检查事实、引用、格式和风险 | 检索、规则检查、评估工具 |
+| fixed | 步骤预先知道 | 普通代码或 Workflow |
+| branching | 分支有限且可枚举 | 状态机 / Workflow |
+| open-ended | 下一步依赖中间观察，难以穷举 | 有界 Agent，常放在 Workflow 节点内 |
 
-### 多 Agent 的好处
+路径轴不是“模型越聪明越开放”。如果步骤能够写清楚，Workflow 通常更容易测试、恢复和审计。
 
-- 职责更清楚。
-- 每个 Agent 可以有专门工具。
-- 可以复用已有 Agent。
-- 复杂任务可以分阶段处理。
+### 轴四：State，状态寿命
 
-### 多 Agent 的代价
+| 取值 | 含义 | 课程证据 |
+| --- | --- | --- |
+| one-shot | 一次请求内完成 | `ModelStep`、RAG answer |
+| session | 多轮会话内延续 | `SessionKey(tenant_id, user_id, session_id)` |
+| durable | 跨进程、等待审批后继续 | `WorkflowRun` 的版本和审批状态 |
 
-- 协作逻辑变复杂。
-- 上下文传递成本变高。
-- 容易出现重复工作。
-- 需要更强的日志和追踪。
-- 需要定义谁对最终结果负责。
+课程 `InMemorySessionStore` 和 `ResearchWorkflow` 用于离线演示状态合同，不提供生产持久化保证。生产环境需要数据库、并发控制、过期策略、备份和恢复演练。
 
-### 初学者建议
+### 轴五：Risk，失败后果
 
-不要一开始做多 Agent。正确顺序是：
+| 取值 | 含义 | 设计要求 |
+| --- | --- | --- |
+| low | 错误可快速发现并轻易撤销 | 基础校验和日志 |
+| controlled | 有业务影响但可通过权限、预算、回滚控制 | 服务端策略、trace、回归测试 |
+| high | 涉及资金、隐私、合规或不可逆动作 | 缩小自动化范围、审批、双人复核或禁止自动执行 |
+
+风险轴会反向限制另外四个轴。开放路径加不可逆动作加高风险，不是“高级 Agent”，而是必须拆分和降权的设计信号。
+
+## 1.7 从五轴映射到组合方案
+
+填写五轴后，再选择组合层。下面不是唯一答案，而是可验证的起点。
+
+| 场景 | 五轴摘要 | 推荐组合 | 第一份证据 |
+| --- | --- | --- | --- |
+| 公司年假问答 | private / none / fixed / one-shot / controlled | 授权 RAG + 引用 | `tests/test_rag.py` 的命中、隔离、拒答 |
+| 查询订单状态 | real-time / read / fixed / one-shot / controlled | Tool Calling | `tests/test_tools.py` 的严格参数与权限拒绝 |
+| 每日销售日报 | real-time / write / fixed / durable / controlled | Workflow + 只读工具 + 摘要模型 | Workflow 状态、幂等、超时测试 |
+| 竞品研究 | public / read / open-ended / durable / controlled | Workflow + 有界 Agent + 搜索工具 | 最大轮数、工具选择、参数准确率 |
+| 自动退款 | real-time / irreversible / branching / durable / high | Workflow + 策略 + 内容绑定审批；Agent 只收集证据 | 权限拒绝、审批哈希、幂等测试 |
+
+### 实践模板：五轴需求判断卡
+
+```markdown
+# 需求名称
+
+## 用户目标与成功证据
+
+## 五轴
+| 轴 | 取值 | 证据 / 理由 |
+| --- | --- | --- |
+| Knowledge | public / private / real-time |  |
+| Action | none / read / write / irreversible |  |
+| Path | fixed / branching / open-ended |  |
+| State | one-shot / session / durable |  |
+| Risk | low / controlled / high |  |
+
+## 组合层
+- 结构化模型调用：
+- RAG：
+- Tools / MCP：
+- Workflow：
+- Agent：
+
+## 应用强制边界
+- 可信身份与权限：
+- 参数校验：
+- 预算与停止条件：
+- 审批与幂等：
+- Trace 与评估：
+
+## 课程离线证据
+
+## 生产扩展
+
+## MVP 明确不做什么
+```
+
+## 1.8 四个核心层的工程边界
+
+### RAG：把授权后的知识交给生成过程
+
+RAG 适合私有知识、长文档和需要引用的回答。课程离线 `InMemoryRetriever.search(query, context, top_k)` 先按 `tenant_id`、允许用户和权限过滤，再做确定性词项重叠评分；`RagCitation.quote` 必须来自真实命中片段，没有足够证据时返回“根据当前资料无法确认”。
+
+这能验证“授权先于相关性”“引用来自源文本”“无证据拒答”三条合同。它不声称等同于生产级向量检索。生产扩展可以加入解析、Embedding、混合检索、重排、持久化索引和内容安全扫描，但仍要保留相同的权限与引用断言。
+
+### Tools：让应用执行动作
+
+工具定义向模型暴露名称、描述和输入 schema。模型只提出调用请求；应用使用严格 Pydantic 模型拒绝未知字段，从可信 `RunContext` 读取用户、租户和权限，再执行处理器。
+
+课程订单工具证明模型不能通过参数覆盖 `tenant_id` 或 `user_id`，缺少 `orders:read` 时返回结构化 `PERMISSION_DENIED`。生产扩展还要按副作用类型补充幂等键、重试策略、审批、限流和审计存储。
+
+### Workflow：控制路径和可恢复状态
+
+Workflow 把步骤、分支、状态版本、审批和恢复条件写进应用。课程 `ResearchWorkflow` 能验证等待审批、审批内容哈希、重复幂等键、超时、取消、租户和所有者边界。
+
+生产环境要把内存状态替换为持久化存储，并处理并发、租约、任务队列和灾难恢复；不要因为课程对象名为 Workflow 就假定这些能力已经自动存在。
+
+### Agent：在预算内选择下一步
+
+课程 `BoundedAgentRunner` 接收 `RunLimits(max_turns, max_tool_calls, max_output_tokens, timeout_seconds)`，检测重复工具调用，保留显式 `ModelContinuation`，并返回带 `stop_reason`、工具结果和 `trace_id` 的 `AgentResult`。
+
+这使“Agent 能完成任务”变成可测试命题：它选了什么工具、参数是否准确、执行了几轮、为何停止、敏感参数是否进入 trace。生产扩展还需要持久化运行、队列、分布式追踪、配额和告警。
+
+## 1.9 多 Agent：最后增加的协调层
+
+多 Agent 只有在职责、工具集、上下文可见性或评估标准确实不同的时候才值得引入。例如研究、事实审查和版式生成可能由不同 specialist 承担，但主流程仍应决定交接顺序、最大 handoff 次数和最终责任人。
+
+初学顺序建议保持为：
 
 ```text
-单次模型调用
-  -> Tool Calling
-  -> RAG
-  -> 单 Agent
+结构化模型调用
+  -> RAG 或单次 Tool Calling
+  -> 固定 Workflow
+  -> 有界单 Agent
   -> Workflow + Agent
-  -> 多 Agent
+  -> 有明确证据后再拆多 Agent
 ```
 
-如果单 Agent 都无法稳定运行，多 Agent 只会把问题放大。
+多 Agent 不是五轴中的第六个风险消除器。它会增加上下文传递、权限配置、成本和故障定位难度。
 
-## 1.10 核心概念七：MCP 在 Agent 系统中的位置
+## 1.10 MCP 在组合架构中的位置
 
-MCP 是 Model Context Protocol。它的作用不是替代 Agent，而是标准化外部工具和上下文资源的接入方式。
+MCP 是 Model Context Protocol。它标准化 Host、Client、Server 之间发现和调用 Tools、Resources、Prompts 的方式，但不替代 Agent 决策、RAG 检索质量或业务权限。
 
-可以这样理解：
+| 角色 | 作用 |
+| --- | --- |
+| Host | 承载用户体验和 Agent / Workflow 的应用 |
+| Client | 连接并调用指定 MCP Server |
+| Server | 暴露工具、资源和提示模板 |
 
-- Agent 是“怎么决策和执行任务”。
-- RAG 是“怎么把知识检索出来给模型”。
-- Workflow 是“怎么把任务按稳定流程编排”。
-- MCP 是“怎么把工具、资源、提示词标准化暴露给模型应用”。
+课程参考实现包含可运行的 stdio MCP server/client smoke test，用于证明工具可发现、可调用并返回结构化结果。MCP 传输成功不等于业务授权成功；身份认证、租户过滤、权限、限流、幂等、审批、审计和可信 Server 白名单仍由应用与服务端实现。
 
-### MCP 的基本角色
+## 1.11 两个课程项目如何使用这些层
 
-| 角色 | 作用 | 类比 |
-| --- | --- | --- |
-| Host | 使用 MCP 的应用，例如 IDE、Agent 平台 | 总入口 |
-| Client | Host 内部连接 MCP Server 的组件 | 连接器 |
-| Server | 提供工具、资源、提示词的服务 | 工具服务 |
+### Know-Engine
 
-### MCP 能暴露什么
+Know-Engine 的核心不是“做一个聊天框”，而是验证私有知识问答合同：解析和索引资料，按可信身份过滤，检索相关片段，生成带真实引用的回答，无证据时拒答，再用固定数据集评估。
 
-- Tools：可调用动作，例如查询订单、搜索文档、生成报表。
-- Resources：可读取资源，例如文件、数据库记录、知识库条目。
-- Prompts：可复用提示词模板。
+第一版可以只做 Markdown 样例、确定性检索和引用。向量库、PDF/Excel、多源路由、Neo4j 和 Text2SQL 属于后续扩展，只有在核心评估稳定后再加入。
 
-### 在本课程里的使用方式
+### Dodo-Agent
 
-在 Dodo-Agent 项目中，可以把企业内部能力包装成 MCP Server：
+Dodo-Agent 训练工具、运行循环、Workflow、MCP 和多 Agent 协作。第一版先做一个 `ModelGateway`、一个受限订单工具、一个 `BoundedAgentRunner` 和 trace；证明权限拒绝、重复调用停止、超时与会话隔离，再扩大工具和 specialist 数量。
 
-```text
-订单系统 MCP Server
-  -> query_order
-  -> query_refund
-  -> query_logistics
+两个项目共享同一原则：模型输出是候选决策，应用合同才是执行边界。
 
-知识库 MCP Server
-  -> search_documents
-  -> get_document
-  -> list_collections
+## 1.12 教师演示
 
-报表系统 MCP Server
-  -> query_sales
-  -> generate_report
+教师用同一个“查询订单 O1001”场景完成三段演示：
+
+1. 展示 Fake Model 只产生 `{"order_id": "O1001"}`，可信身份不在模型参数中。
+2. 分别使用有权限和无权限的 `RunContext`，展示成功与 `PERMISSION_DENIED`。
+3. 切换到重复调用 fixture，展示运行器以 `REPEATED_TOOL_CALL` 停止，并在 trace 中看不到原始工具参数。
+
+随后教师用年假资料演示 RAG：可见片段返回真实引用；错误租户、错误用户或缺少权限的片段在评分前被排除；无证据问题返回拒答。最后把两个场景分别填入五轴卡，说明它们为何不需要同一种“Agent 架构”。
+
+## 1.13 学员实验
+
+### 实验 A：为 10 个场景填写五轴卡
+
+对下面场景逐一填写五轴、组合层、强制边界和第一份验证证据：
+
+| 场景 | 不可遗漏的判断 |
+| --- | --- |
+| 员工询问年假制度 | 私有知识、权限过滤、引用 |
+| 上传合同并指出风险条款 | 私有知识、固定审查项、人工复核 |
+| 每天生成销售日报 | 实时读取、固定路径、持久状态 |
+| 调研 5 家竞品 | 开放路径、搜索预算、来源质量 |
+| 查询订单状态 | 只读工具、可信身份、单次任务 |
+| 自动生成 20 页 PPT | 固定阶段与局部生成、可恢复状态 |
+| 回答安装步骤 | 私有或公开手册、引用、拒答 |
+| 根据日志建议修复步骤 | 工具结果污染、开放探索、受控风险 |
+| 审批退款 | 不可逆动作、高风险、内容绑定审批 |
+| 搜索、阅读、总结、复核研究主题 | Workflow 包住有界 Agent |
+
+### 实验 B：把判断绑定到可运行证据
+
+从 `reference-implementation/` 运行：
+
+```bash
+uv run --group dev --extra live pytest \
+  tests/test_tools.py \
+  tests/test_agent_runner.py \
+  tests/test_rag.py \
+  tests/test_workflow.py \
+  tests/test_evals.py -q
 ```
 
-Agent 平台通过 MCP Client 发现和调用这些工具。
+在 `notes/chapter-01-evidence.md` 中记录每组测试证明了什么，以及它没有证明什么。至少覆盖严格工具参数、可信身份、权限拒绝、预算停止、RAG 引用、租户隔离、Workflow 审批和 eval 参数准确率。
 
-### 需要注意
+### 实验 C：画组合式架构图
 
-MCP 只是协议层。它不会自动帮你解决所有企业工程问题。下面这些仍然要在业务系统里实现：
+选择 Know-Engine 或 Dodo-Agent，图中至少包含应用入口、`RunContext`、Model Gateway、RAG 或工具、Workflow 或 Agent、状态、trace 和评估。每条跨边界箭头都标注数据类型，并写明哪一侧负责校验。
 
-- 用户身份认证。
-- 数据权限。
-- 操作审计。
-- 限流。
-- 幂等。
-- 危险操作确认。
-- 敏感信息脱敏。
+## 1.14 失败注入与排错
 
-## 1.11 课程项目一：Know-Engine 的定位
+按顺序注入三类失败，每次记录现象、根因、控制点和回归命令：
 
-Know-Engine 是企业级知识库问答系统。它主要训练 RAG 能力，也会涉及少量工具调用和流式交互。
+1. 给订单工具增加模型不应提供的 `tenant_id`，确认在处理器执行前得到 `INVALID_ARGUMENTS`。
+2. 移除 `orders:read`，确认权限失败不会被模型重试成成功。
+3. 使用 `[fixture:repeated-order-call]`，确认第二次相同调用执行前停止。
 
-### 它解决的问题
+排错时不要先改 prompt。先判断失败属于知识、动作、路径、状态还是风险控制，再查看对应测试和 trace。参数错误要修 schema 或调用生成；权限错误要修可信上下文或授权配置；循环错误要检查停止预算和重复调用指纹。
 
-企业内部有大量文档：
+## 1.15 自动验证
 
-- 制度文档。
-- 产品手册。
-- 技术文档。
-- 销售资料。
-- 客服知识库。
-- Excel / CSV 报表。
+本章的结构与离线行为使用下面两组命令验证：
 
-员工或客户希望直接提问，而不是自己翻文档。
-
-### 系统核心能力
-
-```mermaid
-flowchart TD
-    Upload["上传文档"] --> Parse["文档解析"]
-    Parse --> Chunk["智能切片"]
-    Chunk --> Embed["Embedding"]
-    Embed --> Store["向量库 / 全文索引"]
-    Ask["用户提问"] --> Search["检索增强"]
-    Store --> Search
-    Search --> Answer["生成答案"]
-    Answer --> Citation["引用来源"]
-    Answer --> Stream["流式输出"]
+```bash
+python3 scripts/validate_course.py
 ```
 
-### 学习价值
-
-通过 Know-Engine，你会学到：
-
-- RAG 基础流程。
-- 文档处理。
-- 向量检索。
-- 混合检索。
-- 引用溯源。
-- 权限过滤。
-- SSE 流式输出。
-- RAG 评估。
-
-### 第一阶段不要做太复杂
-
-MVP 版本只需要：
-
-1. 上传一个 Markdown 或 PDF 文档。
-2. 切片并向量化。
-3. 输入问题。
-4. 检索相关片段。
-5. 让模型基于片段回答。
-6. 返回引用来源。
-
-等这个链路稳定后，再加 Excel、Neo4j、Text2SQL、多源路由。
-
-## 1.12 课程项目二：Dodo-Agent 的定位
-
-Dodo-Agent 是企业级多智能体平台。它主要训练 Agent、Workflow、MCP 和多 Agent 协作能力。
-
-### 它解决的问题
-
-企业里很多任务不是简单问答，而是多步骤任务：
-
-- 调研一个行业。
-- 整理一份报告。
-- 分析一批文件。
-- 生成 PPT。
-- 根据问题调用多个系统。
-- 自动完成办公流程的一部分。
-
-Dodo-Agent 要做的是把这些任务放到统一 Agent 平台里。
-
-### 系统核心能力
-
-```mermaid
-flowchart TD
-    User["用户任务"] --> Router["任务路由"]
-    Router --> QA["智能问答 Agent"]
-    Router --> File["文件问答 Agent"]
-    Router --> Research["深度研究 Agent"]
-    Router --> PPT["PPT 生成 Agent"]
-    QA --> Base["BaseAgent"]
-    File --> Base
-    Research --> Base
-    PPT --> Base
-    Base --> Tools["工具系统"]
-    Tools --> MCP["MCP 工具"]
-    Tools --> RAG["知识库检索"]
-    Tools --> APIs["业务 API"]
-    Base --> Trace["运行轨迹"]
+```bash
+cd reference-implementation
+uv lock --check
+uv run --group dev --extra live pytest -q -m "not live"
+uv run --group dev --extra live ruff check .
 ```
 
-### 学习价值
+根目录结构验证不运行模型。参考实现测试默认使用 Fake Model，不需要凭据。真实模型只属于显式 Live 对比：必须同时设置 `AGENT_COURSE_LIVE_TESTS=1`、非空 `OPENAI_API_KEY` 和显式 `OPENAI_MODEL`，并先确认费用；没有默认模型。
 
-通过 Dodo-Agent，你会学到：
+## 1.16 作业与评分
 
-- Agent 抽象设计。
-- 工具系统。
-- 任务路由。
-- ReAct 执行循环。
-- Plan-Execute 工作流。
-- 多 Agent 协作。
-- MCP Server / Client。
-- 运行轨迹与调试。
-- 企业级权限和观测。
+提交四个学习文件，总分 100 分：
 
-### 第一阶段不要做太复杂
+| 评分项 | 分值 | 满分证据 |
+| --- | ---: | --- |
+| 五轴判断 | 25 | 取值有依据，风险会约束方案 |
+| 组合式架构 | 25 | RAG、Tools、Workflow、Agent 职责没有混淆 |
+| 强制边界 | 25 | 身份、权限、参数、预算、审批和 trace 有明确归属 |
+| 可运行证据 | 25 | 命令、测试名、结果和“未证明事项”完整 |
 
-MVP 版本只需要：
+只写“建议使用 Agent”而没有五轴分析、边界和验证证据，不能获得对应项分数。
 
-1. 一个统一的 `BaseAgent` 接口。
-2. 一个知识库问答 Agent。
-3. 一个 Web 搜索 Agent。
-4. 一个简单路由器。
-5. 一张 Agent Run 日志表。
+## 1.17 Core / Advanced / Production 完成标准
 
-等单 Agent 稳定后，再做多 Agent 协作。
+- **Core**：能为 10 个场景填写五轴卡，选择最小组合层，并运行工具、Agent、RAG 和 Workflow 的离线测试。
+- **Advanced**：能设计 Workflow 包住有界 Agent 的方案，给出预算、会话/持久状态、审批和评估合同。
+- **Production**：能在不改变核心合同的前提下，提出持久化、队列、集中策略、密钥管理、监控和恢复方案，并明确验证与回滚步骤。
 
-## 1.13 如何判断业务需求该用什么方案
+## 1.18 本章资料
 
-下面是一套实用决策流程。
+建议按下面顺序阅读：
 
-```mermaid
-flowchart TD
-    A["收到业务需求"] --> B{"是否主要依赖私有知识？"}
-    B -- 是 --> C["优先 RAG"]
-    B -- 否 --> D{"步骤是否固定？"}
-    D -- 是 --> E["优先 Workflow"]
-    D -- 否 --> F{"是否需要调用工具？"}
-    F -- 否 --> G["普通 Chatbot 或结构化生成"]
-    F -- 是 --> H{"工具选择是否动态？"}
-    H -- 否 --> I["Workflow + Tool Calling"]
-    H -- 是 --> J["Agent"]
-    J --> K{"是否有明显角色分工？"}
-    K -- 是 --> L["多 Agent，但先做单 Agent 验证"]
-    K -- 否 --> M["单 Agent"]
-```
+1. [OpenAI Agents SDK - Agents](https://openai.github.io/openai-agents-python/agents/)：理解 instructions、tools、handoffs、guardrails、context 和 output types。
+2. [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)：理解 Workflow 与 Agent 的工程边界。
+3. [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)：理解 Host、Client、Server 与 Tools、Resources、Prompts。
+4. [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)：建立 Agent、Tools、Handoff 和 Tracing 的整体印象。
+5. [Pydantic AI Documentation](https://ai.pydantic.dev/)：观察类型化 Agent 接口；它不是课程参考实现的必选运行时。
+6. [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)：理解推理与行动循环的研究背景。
+7. [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401)：理解 RAG 的原始问题设定。
+8. [FastAPI Documentation](https://fastapi.tiangolo.com/)：了解如何承载 API 与流式接口。
+9. [Model Context Protocol SDKs](https://modelcontextprotocol.io/docs/sdk)：了解 Python 与 Go 的协议实现入口。
 
-### 实践模板：需求判断卡
+外部资料用于理解生态，仓库中的合同和测试才是本课程离线行为的可执行依据。
 
-每遇到一个需求，先填这张卡：
-
-```markdown
-## 需求名称
-
-## 用户目标
-
-## 是否依赖私有知识
-- 是 / 否
-- 需要哪些资料：
-
-## 是否需要调用外部工具
-- 是 / 否
-- 需要哪些工具：
-
-## 步骤是否明确
-- 明确 / 不明确
-- 已知步骤：
-
-## 失败成本
-- 低 / 中 / 高
-- 为什么：
-
-## 权限要求
-- 是否涉及用户数据：
-- 是否涉及企业敏感数据：
-- 是否需要人工确认：
-
-## 推荐方案
-- Chatbot / RAG / Workflow / Agent / 多 Agent
-
-## 推荐理由
-
-## MVP 范围
-```
-
-完成这个判断卡，比直接写代码更重要。
-
-## 1.14 本章完整实践任务
-
-本章实践分为 4 个任务。全部完成后，你就算真正完成第 1 章。
-
-### 任务 1：整理 Agent 概念笔记
-
-创建文件：
-
-```text
-notes/chapter-01-agent-concepts.md
-```
-
-写入以下内容：
-
-```markdown
-# Agent 概念笔记
-
-## 我对 AI Agent 的定义
-
-## Agent 的 6 个组成部分
-
-| 组成 | 我的理解 | 例子 |
-| --- | --- | --- |
-| Instructions |  |  |
-| Model |  |  |
-| Tools |  |  |
-| Context |  |  |
-| Memory |  |  |
-| Run Loop |  |  |
-
-## Chatbot、RAG、Workflow、Agent、多 Agent 的区别
-
-## 我认为最容易混淆的 3 个点
-
-## 读完本章后我更新的理解
-```
-
-验收标准：
-
-- 你能用自己的话解释 Agent。
-- 不是复制定义，而是能写出具体例子。
-- 能说清楚 Agent 和 RAG 的区别。
-
-### 任务 2：完成 10 个场景分类
-
-创建文件：
-
-```text
-notes/chapter-01-scenario-classification.md
-```
-
-填表：
-
-```markdown
-# 场景分类练习
-
-| 场景 | 推荐方案 | 理由 | 可能风险 |
-| --- | --- | --- | --- |
-| 员工问公司年假制度 |  |  |  |
-| 用户上传合同并要求指出风险条款 |  |  |  |
-| 每天生成销售日报 |  |  |  |
-| 调研 5 家竞品并输出报告 |  |  |  |
-| 查询订单状态 |  |  |  |
-| 自动生成 20 页 PPT |  |  |  |
-| 回答产品安装步骤 |  |  |  |
-| 根据异常日志建议修复步骤 |  |  |  |
-| 审批退款申请 |  |  |  |
-| 对研究主题搜索、阅读、总结、复核 |  |  |  |
-```
-
-参考判断：
-
-| 场景 | 推荐方案 | 原因 |
-| --- | --- | --- |
-| 员工问公司年假制度 | RAG | 主要基于制度文档回答，需要引用来源 |
-| 用户上传合同并要求指出风险条款 | RAG + Workflow | 需要基于文件分析，并按固定检查项输出 |
-| 每天生成销售日报 | Workflow | 定时、固定步骤、固定格式 |
-| 调研 5 家竞品并输出报告 | Agent / Workflow + Agent | 路径不固定，需要搜索、比较、总结 |
-| 查询订单状态 | Tool Calling / Workflow | 一次工具查询即可，不需要 Agent 自主循环 |
-| 自动生成 20 页 PPT | Workflow + Agent | 有流程，也需要生成和调整 |
-| 回答产品安装步骤 | RAG | 基于产品手册回答 |
-| 根据异常日志建议修复步骤 | Agent / RAG + Tool | 可能需要检索文档、分析日志、调用诊断工具 |
-| 审批退款申请 | Workflow + 人工确认 | 高风险，不适合完全自主 Agent |
-| 对研究主题搜索、阅读、总结、复核 | 多 Agent 或 Workflow + Agent | 有明显分工和多轮探索 |
-
-验收标准：
-
-- 每个场景都写出推荐方案。
-- 每个推荐都写出理由。
-- 至少指出 3 个场景的风险。
-
-### 任务 3：画出你的课程项目架构图
-
-创建文件：
-
-```text
-notes/chapter-01-system-architecture.md
-```
-
-选择 Know-Engine 或 Dodo-Agent，画出一版架构图。
-
-可以使用 Mermaid：
-
-```mermaid
-flowchart TD
-    User["用户"] --> Web["Web / IM 入口"]
-    Web --> API["FastAPI API"]
-    API --> Agent["Agent / RAG 服务"]
-    Agent --> Model["大模型"]
-    Agent --> Tool["工具系统"]
-    Agent --> Vector["向量库"]
-    Agent --> DB["业务数据库"]
-    Agent --> Log["运行日志"]
-```
-
-然后补充说明：
-
-```markdown
-## 我选择的项目
-
-## 用户是谁
-
-## 核心场景
-
-## 系统模块
-
-## 数据从哪里来
-
-## Agent 能调用哪些工具
-
-## 哪些地方需要权限控制
-
-## 哪些地方需要日志和评估
-```
-
-验收标准：
-
-- 架构图至少包含用户入口、模型、工具、数据、日志。
-- 能解释每个模块的作用。
-- 能指出至少 3 个权限或安全风险。
-
-### 任务 4：制定个人 12 周学习计划
-
-创建文件：
-
-```text
-notes/chapter-01-12-week-plan.md
-```
-
-填入：
-
-```markdown
-# 12 周 AI Agent 学习计划
-
-## 我的目标
-
-## 每周可投入时间
-
-## 我的技术基础
-
-## 12 周安排
-
-| 周次 | 学习主题 | 本周产出 | 验收方式 |
-| --- | --- | --- | --- |
-| 第 1 周 | 课程准备 + 第 1 章 |  |  |
-| 第 2 周 | 第 2 章 |  |  |
-| 第 3 周 | 第 3 章 |  |  |
-| 第 4 周 | 第 4 章 |  |  |
-| 第 5 周 | 第 5 章 |  |  |
-| 第 6 周 | 第 6 章 |  |  |
-| 第 7 周 | 第 7 章 |  |  |
-| 第 8 周 | 第 8 章 |  |  |
-| 第 9 周 | 第 9 章 |  |  |
-| 第 10 周 | 第 10 章 |  |  |
-| 第 11 周 | 第 13 章 + Know-Engine 项目整合 |  |  |
-| 第 12 周 | 第 14 章最终评估与演示 |  |  |
-
-## 我最担心的 3 个难点
-
-## 我准备如何解决
-```
-
-第 11、12 和 15 章是 Optional Advanced 工作，位于这条必修 12 周依赖路线之外。
-
-验收标准：
-
-- 每周都有明确产出。
-- 每周产出都能被检查。
-- 计划符合你的时间投入，不是空泛口号。
-
-## 1.15 本章阅读资料
-
-建议按下面顺序阅读。第 1 遍只建立直觉，不需要记住所有 API。
-
-### 必读资料
-
-1. [OpenAI Agents SDK - Agents](https://openai.github.io/openai-agents-python/agents/)  
-   重点看 Agent 的核心组成，尤其是 instructions、tools、handoffs、guardrails、context、output types。
-
-2. [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)  
-   重点理解 Workflow 和 Agent 的区别。文章里对“什么时候该用简单方案，什么时候才需要 Agent”讲得很清楚。
-
-3. [Model Context Protocol Documentation](https://modelcontextprotocol.io/docs/getting-started/intro)  
-   重点理解 MCP 的 Host、Client、Server，以及 Tools、Resources、Prompts。
-
-4. [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)  
-   重点建立 Python 生态下 Agent、Tools、Handoff、Tracing 的整体印象。
-
-5. [Pydantic AI Documentation](https://ai.pydantic.dev/)  
-   重点理解如何用 Python 类型系统管理 Agent 输入、输出和工具参数。
-
-### 扩展资料
-
-1. [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)  
-   重点理解“推理 + 行动”的 Agent 基本思想。
-
-2. [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401)  
-   重点理解 RAG 为什么能缓解模型知识缺失问题。
-
-3. [FastAPI Documentation](https://fastapi.tiangolo.com/)  
-   暂时只浏览目录，知道后续会如何用 Python Web 服务承载模型调用、工具调用和流式输出。
-
-4. [Model Context Protocol SDKs](https://modelcontextprotocol.io/docs/sdk)  
-   重点确认 Python 与 Go 都可以实现 MCP Server / Client，为后续技术边界做准备。
-
-## 1.16 本章自测题
-
-完成学习后，尝试不看资料回答。
-
-### 概念题
-
-1. 为什么说 Agent 不是普通聊天机器人？
-2. RAG 的输入和输出分别是什么？
-3. Workflow 和 Agent 最大的区别是什么？
-4. Tool Calling 为什么必须做参数校验？
-5. MCP 解决的是工具接入问题，还是 Agent 决策问题？
-6. 为什么多 Agent 不适合作为初学者第一步？
-
-### 判断题
-
-1. 只要使用了大模型，就是 Agent。  
-   答案：错误。
-
-2. RAG 可以让模型基于企业私有文档回答问题。  
-   答案：正确。
-
-3. Workflow 的自主性通常高于 Agent。  
-   答案：错误。
-
-4. Agent 调用工具时，权限可以完全依赖 Prompt 控制。  
-   答案：错误。
-
-5. MCP 可以用来标准化工具和资源接入。  
-   答案：正确。
-
-### 场景题
-
-给出你的方案选择和理由：
-
-```text
-公司希望做一个 AI 助手。员工可以问制度问题，也可以上传 Excel 分析销售数据，还可以让助手生成周报。
-```
-
-你需要回答：
-
-1. 哪些部分用 RAG？
-2. 哪些部分用 Workflow？
-3. 哪些部分可能需要 Agent？
-4. 哪些工具需要权限控制？
-5. 第一版 MVP 应该先做什么？
-
-参考思路：
-
-- 制度问题适合 RAG。
-- 周报生成适合 Workflow。
-- Excel 分析可以先做 Workflow + Tool Calling，复杂探索再引入 Agent。
-- 查询销售数据、读取文件、发送周报都需要权限控制。
-- MVP 先做制度文档问答和引用来源，不要一上来做全功能 Agent。
-
-## 1.17 本章完成标准
-
-你完成第 1 章的标准不是“看完了”，而是交付下面 4 个文件：
-
-```text
-notes/chapter-01-agent-concepts.md
-notes/chapter-01-scenario-classification.md
-notes/chapter-01-system-architecture.md
-notes/chapter-01-12-week-plan.md
-```
-
-并且你能做到：
-
-- 用 3 分钟讲清楚 Agent、RAG、Workflow、多 Agent 的区别。
-- 面对一个业务需求，能先判断方案类型，而不是直接开始写代码。
-- 能画出 Know-Engine 或 Dodo-Agent 的第一版架构图。
-- 能说出 Agent 系统最重要的 5 个工程风险。
-- 能制定符合自己时间投入的 12 周学习计划。
-
-如果这些都能做到，再进入第 2 章“大模型应用基础”会顺很多。
-
-## 1.18 本章复盘模板
-
-学习结束后，建议写一段复盘：
+## 1.19 复盘模板
 
 ```markdown
 # 第 1 章复盘
 
-## 我以前对 Agent 的理解
+## 我以前把哪些层误认为互斥方案
 
-## 现在更新后的理解
+## 我的一个需求的五轴取值
 
-## 我认为 RAG、Workflow、Agent 的区别
+## 我选择了哪些组合层，为什么
 
-## 我最想做的项目
+## 哪些决定由模型提出，哪些由应用强制
 
-## 我当前最大的疑问
+## 哪条离线测试最改变我的判断
 
-## 下一章学习前要准备的东西
+## 课程参考实现没有证明哪些生产能力
+
+## 下一章我要验证的最小模型调用是什么
 ```
 
-复盘的价值不在于写得漂亮，而在于把模糊的直觉变成明确的判断。
+完成本章后，你不必记住所有框架名称，但应该养成一个稳定习惯：先描述五个轴，再组合能力层，最后为每个边界指定可运行证据。
