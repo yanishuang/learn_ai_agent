@@ -103,7 +103,7 @@ completed / cancelled / timed_out
 
 - 同一 topic 的不同 run 得到不同 hash；
 - 旧 state/version 的审批不能批准新内容；
-- 决策 hash 不等于已保存 payload hash 时，在改变状态前抛出 `ApprovalPayloadMismatchError`。
+- 决策 hash 不等于已保存 payload hash 时会抛出 `ApprovalPayloadMismatchError`，但 `approve()` 会先 materialize timeout：截止时间前 mismatch 不改变 run；截止时间后 mismatch 会先把 run 写成 `timed_out` 并增加 `state_version`，再抛出 mismatch。
 
 `ApprovalDecision` 只含 `approved`、`payload_hash` 和非空 `idempotency_key`。审批 actor 由可信 `RunContext.user_id` 提供，不能由请求 body 自报。
 
@@ -185,7 +185,7 @@ assert workflow.resume(waiting.run_id, context) == completed
 (tenant_id, decision.idempotency_key)
 ```
 
-保存的 fingerprint 为 `(run_id, approved, payload_hash)`。同一 key 和 fingerprint 返回当前 run；同一 key 换任何内容都冲突。检查顺序还保证 hash 不匹配不会写入 idempotency 记录，也不会改变 run。
+保存的 fingerprint 为 `(run_id, approved, payload_hash)`。同一 key 和 fingerprint 返回当前 run；同一 key 换任何内容都冲突。mismatch 不会写入 approval idempotency 记录，也不会执行批准/拒绝 transition；但 timeout materialization 位于 idempotency 与 hash 检查之前，因此迟到的 mismatch 或 idempotency conflict 仍可能先把 run 转成 `timed_out`。
 
 当前字典只在单进程内提供这些语义。并发、多 worker 和进程重启需要数据库唯一约束。
 
@@ -194,6 +194,57 @@ assert workflow.resume(waiting.run_id, context) == completed
 `ResearchWorkflow` 接收正数 `timeout_seconds` 和可注入的 monotonic clock。`start()` 保存内部 deadline。每次 `approve()`、`resume()` 或 `cancel()` 先 materialize timeout：若当前时间达到 deadline，run 变为 `timed_out`、`error_code="WORKFLOW_TIMEOUT"`，并增加 state version。
 
 当前审批 payload 没有 `expires_at` 字段，deadline 也没有持久化进 `WorkflowRun`。因此只能准确说“当前内存 run 有统一 deadline，迟到审批会先转成 timed_out”，不能说“审批请求已持久化 expiry”。
+
+下面的可执行探针固定了“迟到且 hash 错误”的当前行为：异常仍抛出，但 timeout transition 已提交；同一个 idempotency key 没有被 mismatch 消耗，随后用正确 hash 调用会读到终态。
+
+```python
+import pytest
+
+from agent_course.core import RunContext
+from agent_course.workflows import (
+    ApprovalDecision,
+    ApprovalPayloadMismatchError,
+    ResearchWorkflow,
+    WorkflowStatus,
+)
+
+
+class ManualClock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+
+clock = ManualClock()
+context = RunContext(
+    user_id="user-1",
+    tenant_id="tenant-1",
+    request_id="late-mismatch",
+    permissions=frozenset({"research:run", "research:approve"}),
+)
+workflow = ResearchWorkflow(timeout_seconds=10, clock=clock)
+waiting = workflow.start("AI safety", context)
+clock.value = 10.0
+decision = ApprovalDecision(
+    approved=True,
+    payload_hash="0" * 64,
+    idempotency_key="late-decision",
+)
+
+with pytest.raises(ApprovalPayloadMismatchError):
+    workflow.approve(waiting.run_id, decision, context)
+
+timed_out = workflow.get(waiting.run_id, context)
+assert timed_out.status is WorkflowStatus.TIMED_OUT
+assert timed_out.state_version == 2
+assert workflow.approve(
+    waiting.run_id,
+    decision.model_copy(update={"payload_hash": waiting.approval.content_hash}),
+    context,
+) == timed_out
+```
 
 **生产设计练习：审批 expiry。** 在 approval row 中保存 `expires_at`，审批 transaction 同时检查：row 未使用、未撤销、`now() < expires_at`、payload hash 和 state version 仍匹配。过期 transition 写审计事件并进入 `timed_out` 或重新申请审批，不能静默刷新旧 hash。
 
@@ -314,7 +365,7 @@ Workflow 的 checkpoint 应放在业务语义稳定的位置：
 
 1. 运行 8.4 示例，展示 state version 1 -> 2 -> 3。
 2. 在审批前调用 `resume()`，证明不会越过 `waiting_for_approval`。
-3. 用第一条 run 的 hash 审批同 topic 的第二条 run，展示 mismatch 且状态不变。
+3. 在 deadline 前用第一条 run 的 hash 审批同 topic 的第二条 run，展示 mismatch 且状态不变；deadline 后重复该探针，展示先 `timed_out` 再抛 mismatch。
 4. 重放相同 approval key 与内容，展示幂等返回；改变 `approved`，展示冲突。
 5. 注入手动 clock，在 deadline 之后 approve/cancel，展示先 materialize `timed_out`。
 6. 对照生产状态图，指出 `waiting_for_input`、`retrying` 和数据库 constraints 尚未由参考实现提供。
@@ -327,7 +378,7 @@ Task 11 计划创建本章实验目录 `labs/chapter-08/`；该目录在本次 T
 
 1. 完成 start -> waiting -> approve -> running -> resume -> completed。
 2. 验证拒绝审批进入 `cancelled`，owner cancel 幂等。
-3. 验证 payload hash 不能跨 run 重放，idempotency key 冲突不改变 state。
+3. 验证 payload hash 不能跨 run 重放；区分 deadline 前无状态变化与 deadline 后先 materialize timeout。
 4. 验证 permission、tenant、owner 和独立 approver 边界。
 5. 用 injected clock 验证 waiting/running run 的 timeout。
 6. 设计包含 `waiting_for_input` 和 `retrying` 的扩展状态图。
@@ -350,7 +401,8 @@ uv run --group dev --extra live pytest tests/test_workflow.py -q
 
 | 注入 | 预期 | 关键证据 |
 | --- | --- | --- |
-| 旧 run hash 审批新 run | `ApprovalPayloadMismatchError` | 新 run state 不变 |
+| deadline 前用旧 run hash 审批新 run | `ApprovalPayloadMismatchError` | 新 run state 不变 |
+| deadline 后提交错误 hash | 先写 `timed_out`/版本 +1，再抛 mismatch | timeout materialization 早于 hash 检查 |
 | 同一 start key 换 topic | `IdempotencyConflictError` | 原 run 仍可读取 |
 | 同一 approval key 换 decision | `IdempotencyConflictError` | 无第二次 transition |
 | 非 owner resume/cancel | `WorkflowAccessError` | tenant/owner 检查顺序 |
@@ -362,7 +414,7 @@ uv run --group dev --extra live pytest tests/test_workflow.py -q
 
 ## 自动验证
 
-当前 `tests/test_workflow.py` 已验证：版本化初始状态、内容绑定 hash、跨 run 重放拒绝、mismatch 无状态变更、审批后恢复、开始与审批幂等冲突、permission/tenant/owner、waiting/running timeout，以及 cancel 幂等。
+当前 `tests/test_workflow.py` 已验证：版本化初始状态、内容绑定 hash、deadline 前跨 run 重放拒绝与 mismatch 无状态变更、审批后恢复、开始与审批幂等冲突、permission/tenant/owner、waiting/running timeout，以及 cancel 幂等。本章额外行为探针覆盖 late mismatch 的 timeout-first 顺序。
 
 文档验收还应确认：
 

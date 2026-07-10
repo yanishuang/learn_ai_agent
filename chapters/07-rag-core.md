@@ -144,23 +144,47 @@ def citation_is_grounded(hit_content: str, quote: str) -> bool:
 
 **以下 SQL 是设计练习，不是参考实现已经创建的表。** `reference-implementation/compose.yaml` 只提供可选 PostgreSQL/pgvector 服务，默认测试不会启动它，也没有迁移脚本。
 
-版本化文档表：
+逻辑文档是 ACL 的唯一事实来源；版本表保存内容历史，`current_published_version` 是默认检索边界：
 
 ```sql
 create table documents (
   id text not null,
   tenant_id text not null,
-  document_version integer not null check (document_version > 0),
-  content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
   title text not null,
   source_uri text,
   access_scope text not null check (access_scope in ('tenant', 'users')),
   allowed_user_ids text[] not null default '{}',
+  required_permissions text[] not null default '{}',
+  current_published_version integer check (current_published_version > 0),
   created_by text not null,
   created_at timestamptz not null default now(),
-  primary key (tenant_id, id, document_version),
-  unique (tenant_id, id, content_hash)
+  primary key (tenant_id, id),
+  check (access_scope = 'users' or cardinality(allowed_user_ids) = 0)
 );
+
+create table document_versions (
+  tenant_id text not null,
+  document_id text not null,
+  document_version integer not null check (document_version > 0),
+  content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
+  publication_status text not null
+    check (publication_status in ('building', 'published', 'retired')),
+  created_at timestamptz not null default now(),
+  primary key (tenant_id, document_id, document_version),
+  unique (tenant_id, document_id, content_hash),
+  foreign key (tenant_id, document_id)
+    references documents (tenant_id, id)
+);
+
+create unique index document_versions_one_published_idx
+  on document_versions (tenant_id, document_id)
+  where publication_status = 'published';
+
+alter table documents
+  add constraint documents_current_published_version_fk
+  foreign key (tenant_id, id, current_published_version)
+  references document_versions (tenant_id, document_id, document_version)
+  deferrable initially deferred;
 ```
 
 版本化 chunk 与 embedding 表：
@@ -173,21 +197,16 @@ create table document_chunks (
   document_id text not null,
   tenant_id text not null,
   document_version integer not null check (document_version > 0),
-  content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
   embedding_model text not null,
   embedding_dimensions integer not null check (embedding_dimensions = 1536),
   chunker_version text not null,
   chunk_index integer not null check (chunk_index >= 0),
   page_number integer check (page_number > 0),
   source_offset integer not null check (source_offset >= 0),
-  access_scope text not null check (access_scope in ('tenant', 'users')),
-  allowed_user_ids text[] not null default '{}',
-  required_permissions text[] not null default '{}',
-  title text not null,
   content text not null,
   embedding vector(1536) not null,
   foreign key (tenant_id, document_id, document_version)
-    references documents (tenant_id, id, document_version),
+    references document_versions (tenant_id, document_id, document_version),
   unique (
     tenant_id,
     document_id,
@@ -199,52 +218,77 @@ create table document_chunks (
 );
 ```
 
+`document_chunks` 故意不复制 `access_scope`、`allowed_user_ids` 或 `required_permissions`。这样 chunk 不可能带着比所属文档更宽松的 ACL；复合外键还保证 chunk 的 tenant/document/version 组合确实存在。若业务需要片段级限制，应建立受外键约束的独立 ACL 关系并在查询中同时收紧，不能新增无人校验的重复列。
+
 这些字段解决的问题不同：
 
 | 字段 | 必须回答的问题 |
 | --- | --- |
-| `document_version` | hit 来自文档的哪一版，更新后能否回放旧答案 |
-| `content_hash` | 内容是否真的变化，摄取能否幂等去重 |
+| `document_version` | hit 来自文档的哪一版，更新后能否回放旧答案；默认由 `current_published_version` 选定 |
+| `content_hash` | 版本内容是否真的变化，摄取能否幂等去重 |
 | `embedding_model` | 哪个模型生成向量，能否安全比较 query/document 向量 |
 | `embedding_dimensions` | 存储维度与模型输出是否一致 |
 | `chunker_version` | 切片算法变更后如何重建并比较 |
 | `page_number` | 可分页来源的显示定位；非分页来源可为 `NULL` |
 | `source_offset` | chunk 在规范化源文本中的起点，用于精确追溯 |
-| `access_scope` | 是租户内可见还是仅指定用户可见 |
+| `access_scope` | 逻辑文档是租户内可见还是仅指定用户可见；它是 chunk 查询的权威 ACL |
 
 同一 vector 列的维度是 schema 级约束。若更换为不同维度，应该创建新的列/表/分区并重建索引，不能只改 `embedding_dimensions` 元数据后继续混算。
 
 ### 7.6 授权条件必须写进 SQL
 
-**以下仍是生产设计练习。** 查询同时带入认证层提供的 `tenant_id`、`user_id` 和 permission 数组；这些参数不能来自模型生成的 tool arguments。
+**以下仍是生产设计练习。** 查询同时带入认证层提供的 `tenant_id`、`user_id` 和 permission 数组；这些参数不能来自模型生成的 tool arguments。正常检索令两个 replay 参数都为 `NULL`，只读取每个文档当前发布版本；受授权的审计回放必须同时给出一个 document/version，才能读取保留的旧向量。
 
 ```sql
 select
-  id,
-  document_id,
-  document_version,
-  title,
-  content,
-  page_number,
-  source_offset,
-  1 - (embedding <=> :query_embedding) as score
-from document_chunks
-where tenant_id = :tenant_id
-  and embedding_model = :embedding_model
-  and embedding_dimensions = :embedding_dimensions
+  c.id,
+  c.document_id,
+  c.document_version,
+  d.title,
+  c.content,
+  c.page_number,
+  c.source_offset,
+  1 - (c.embedding <=> :query_embedding) as score
+from document_chunks as c
+join documents as d
+  on d.tenant_id = c.tenant_id
+ and d.id = c.document_id
+join document_versions as v
+  on v.tenant_id = c.tenant_id
+ and v.document_id = c.document_id
+ and v.document_version = c.document_version
+where d.tenant_id = :tenant_id
+  and c.embedding_model = :embedding_model
+  and c.embedding_dimensions = :embedding_dimensions
   and (
-    access_scope = 'tenant'
+    d.access_scope = 'tenant'
     or (
-      access_scope = 'users'
-      and :user_id = any(allowed_user_ids)
+      d.access_scope = 'users'
+      and :user_id = any(d.allowed_user_ids)
     )
   )
-  and required_permissions <@ :trusted_permissions::text[]
-order by embedding <=> :query_embedding
+  and d.required_permissions <@ cast(:trusted_permissions as text[])
+  and (
+    (
+      :replay_document_id is null
+      and :replay_document_version is null
+      and d.current_published_version is not null
+      and c.document_version = d.current_published_version
+      and v.publication_status = 'published'
+    )
+    or (
+      :replay_document_id is not null
+      and :replay_document_version is not null
+      and c.document_id = :replay_document_id
+      and c.document_version = :replay_document_version
+      and v.publication_status in ('published', 'retired')
+    )
+  )
+order by c.embedding <=> :query_embedding
 limit :top_k;
 ```
 
-这里的租户、用户和权限过滤与 ANN 排序处于同一查询。应用层仍需做输入校验和结果授权断言，但不能把 SQL 过滤删除。访问规则更复杂时，可以用授权关系表和 `exists` 子查询；核心不变：不可见记录不能进入候选结果。
+这里的租户、用户和权限过滤都读取 `documents`，与 ANN 排序处于同一查询；chunk 自身没有可漂移的 ACL。普通查询还必须同时满足发布指针和 `publication_status='published'`。发布新版本时，在一个事务中把旧版本标为 `retired`、新版本标为 `published`，再移动 `current_published_version`；旧 chunk/vector 不删除，只能通过受控 replay 参数读取。应用层仍需校验 replay 权限和结果授权，但不能删除这些 SQL 条件。
 
 ### 7.7 HNSW 与 IVFFlat 的取舍
 
@@ -275,10 +319,10 @@ uploaded -> parsing -> chunking -> embedding -> indexed
 
 1. 规范化来源并计算 `content_hash`。
 2. 若 hash 和版本策略表明未变化，幂等返回现有索引结果。
-3. 使用显式 `chunker_version` 生成 chunk，并保存 page/offset。
+3. 以 `building` 状态创建版本，使用显式 `chunker_version` 生成 chunk，并保存 page/offset。
 4. 使用显式 `embedding_model` 和维度生成向量。
-5. 在同一发布边界把新版本标记为可检索；不要让半完成版本进入查询。
-6. 保留足够元数据回放旧 run，并按保留策略清理旧向量。
+5. 在同一事务中发布版本并移动 `current_published_version`；不要让半完成版本进入查询。
+6. 保留旧版本和向量用于授权回放，再按明确保留策略清理。
 
 参考实现没有实现这条摄取 pipeline；本章 Core 只要求理解并验证离线 retrieval 合同。
 
@@ -355,7 +399,7 @@ uv run --group dev --extra live pytest tests/test_rag.py -q
 - 无答案和误导性单词重合都会拒答；
 - 答案来自 top hit，citation quote 是 content 子串。
 
-本章文档验收还应确认：八个指定元数据字段全部出现；SQL 同时含 tenant 和 user access 条件；HNSW/IVFFlat 被描述为权衡；生产 schema 明确标记为设计练习；Python fence 可解析；计划 lab 路径没有写成当前失效链接。
+本章文档验收还应确认：八个指定元数据字段全部出现；ACL 只由文档表提供且 query 不信任 chunk ACL；普通查询只读当前发布版本，显式 replay 才能读保留旧向量；SQL 同时含 tenant 和 user access 条件；HNSW/IVFFlat 被描述为权衡；生产 schema 明确标记为设计练习；Python fence 可解析；计划 lab 路径没有写成当前失效链接。
 
 ## 作业与评分
 

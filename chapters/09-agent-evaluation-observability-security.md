@@ -77,7 +77,31 @@ LLM judge 适合规则难以完整描述的维度，例如说明是否完整、�
 | `expect_unauthorized_action_blocked` | 需要验证拒绝且没有成功工具结果 |
 | `max_turns` | case 级轨迹上限，默认 4 |
 
-`evaluate_cases()` 调用 `EvaluationApplication.run_agent(question, context, limits)`，对每个结果做确定性评分。重复 case ID 会在运行前失败。输出按 case ID 稳定排序，`to_json()` 使用排序键和紧凑 JSON，因此相同输入可做 snapshot regression。
+`evaluate_cases()` 调用 `EvaluationApplication.run_agent(question, context, limits)`，对每个结果做确定性评分。重复 case ID 会在运行前失败。输出按 case ID 稳定排序，`to_json()` 使用排序键和紧凑 JSON，所以**同一个内存 report** 或字段完全相同的 report 会稳定序列化。新 run 的 `trace_id` 默认由 trace sink 随机生成；Live 输出还可能随机变化，因此 fresh runs 不能默认按原始 JSON 做逐字节相等断言。
+
+做跨 run snapshot regression 时，先固定可确定输入，再规范化 trace ID 等易变标识；原始 trace ID 另存为诊断关联，不进入 baseline diff：
+
+```python
+import json
+from typing import Any
+
+from agent_course.evals import EvalReport
+
+
+def normalized_eval_json(report: EvalReport) -> str:
+    payload: dict[str, Any] = report.model_dump(mode="json")
+    for result in payload["results"]:
+        result["trace_id"] = "<TRACE_ID>"
+    return json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+```
+
+这个 helper 是课程侧 regression 设计，不是当前 evaluator 已导出的 API。即使规范化 ID，两个随机 Live run 的业务字段仍可能不同；它们应使用第 9.8 节的重复运行分布，而不是强求字节一致。
 
 ### 9.3 可执行示例
 
@@ -225,7 +249,7 @@ Regression 流程：
 2. 固定 Fake Model、代码、数据 snapshot 和 limits。
 3. 先跑确定性断言，任何硬边界失败直接阻断。
 4. 对适用 case 才计算分母，报告 rate 的分子/分母。
-5. 保存稳定 JSON report 与失败 trace ID。
+5. 保存原始 report 与失败 trace ID 供诊断；baseline diff 使用规范化易变 ID 后的 canonical JSON。
 6. 与批准 baseline 比较；新增 case 不能通过删旧失败来“改善”比例。
 7. 线上失败脱敏、人工确认标签后加入数据集，并记录来源事件和修复版本。
 
@@ -312,7 +336,7 @@ Live repeated runs 会产生费用，必须显式启用、设置预算并与默�
 2. 构造 `ToolResult` 自称成功但没有 `model_tool_calls` 的结果，展示工具与参数评分不能被伪造输出骗过。
 3. 构造额外 `tenant_id` 参数，展示 canonical exact match 失败。
 4. 运行 unauthorized case，展示 stop reason 和“无成功副作用”必须同时成立。
-5. 展示同一输入顺序变化时 report 仍按 case ID 稳定序列化。
+5. 用固定 `trace_id` 的同一组结果展示输入顺序变化时 report 仍按 case ID 稳定序列化，再展示两个 fresh run 的原始 JSON 会因 trace ID 不同而不同。
 6. 关联 trace，找到重复/超预算/脱敏问题。
 7. 对一个语义 rubric 演示人工 gold set 与 judge 分歧，而不是把 judge 分数直接当真值。
 
@@ -367,7 +391,7 @@ uv run --group dev --extra live pytest \
 - task、tool、argument、unauthorized 和 turn 指标；
 - 错工具、错参数、额外参数和超轮数的失败标签；
 - 嵌套 JSON 的类型敏感规范比较；
-- case 排序和 JSON 序列化稳定；
+- case 排序和同一 report/固定 trace ID 的 JSON 序列化稳定；fresh run 需先规范化易变 trace ID 才能做字节级 baseline 比较；
 - 伪造 tool result 不能替代模型调用证据；
 - 不回显参数的 tool result 仍可从 model call 正确评分；
 - 无适用 case 和空 report 的聚合为 `None`。
