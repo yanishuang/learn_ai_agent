@@ -153,3 +153,34 @@ course validation passed
 
 - Ran `python3 scripts/validate_course.py`; result: `course validation passed`.
 - Ran `git diff --check`; completed without output.
+
+## Important Task 1 Review Finding Fix: Malformed Course Manifest JSON
+
+- Added `test_malformed_course_manifest_json_is_reported` to verify that malformed `docs/course-manifest.json` returns exactly `docs/course-manifest.json: invalid JSON`.
+- Ran:
+
+  ```bash
+  python3 -m pytest tests/test_validate_course.py -q
+  ```
+
+  RED result:
+
+  ```text
+  exit_code=1
+  ....F...                                                                 [100%]
+  FAILED tests/test_validate_course.py::test_malformed_course_manifest_json_is_reported
+  E   json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+  1 failed, 7 passed in 0.03s
+  ```
+
+- Added minimal `JSONDecodeError` handling in `_validate_course_manifest`.
+- Re-ran the exact test command. GREEN result:
+
+  ```text
+  exit_code=0
+  ........                                                                 [100%]
+  8 passed in 0.01s
+  ```
+
+- Ran `python3 scripts/validate_course.py`; exact result: `course validation passed`.
+- Ran `git diff --check`; exact result: no output and exit code 0.

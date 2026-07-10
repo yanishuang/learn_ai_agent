@@ -49,6 +49,16 @@ def test_manifest_requires_listed_chapters_and_exact_headings(tmp_path: Path) ->
     ]
 
 
+def test_malformed_course_manifest_json_is_reported(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "course-manifest.json").write_text("{not-json}\n", encoding="utf-8")
+
+    assert validate_repository(tmp_path) == [
+        "docs/course-manifest.json: invalid JSON"
+    ]
+
+
 def test_ecosystem_matrix_requires_recognized_maturity_labels(tmp_path: Path) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()

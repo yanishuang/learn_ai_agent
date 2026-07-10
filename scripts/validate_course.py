@@ -93,7 +93,11 @@ def _validate_course_manifest(root: Path) -> list[str]:
     if not manifest_file.is_file():
         return []
 
-    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    try:
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return ["docs/course-manifest.json: invalid JSON"]
+
     errors: list[str] = []
     for chapter in manifest:
         chapter_path = Path(chapter["path"])
