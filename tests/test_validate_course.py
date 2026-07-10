@@ -330,3 +330,25 @@ def test_ecosystem_matrix_uses_real_table_after_a_fenced_decoy(tmp_path: Path) -
     )
 
     assert validate_repository(tmp_path) == []
+
+
+def test_ecosystem_matrix_reports_physical_line_after_fenced_decoy(
+    tmp_path: Path,
+) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "ecosystem-maturity.md").write_text(
+        "```markdown\n"
+        "| Technology | Maturity |\n"
+        "| --- | --- |\n"
+        "| Example SDK | Stable |\n"
+        "```\n\n"
+        "| Technology | Maturity |\n"
+        "| --- | --- |\n"
+        "| Example SDK | Unknown |\n",
+        encoding="utf-8",
+    )
+
+    assert validate_repository(tmp_path) == [
+        "docs/ecosystem-maturity.md:9: invalid maturity label Unknown"
+    ]

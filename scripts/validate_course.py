@@ -69,10 +69,13 @@ def _lines_outside_fenced_code_blocks(markdown_file: Path) -> list[str]:
         if fence is None:
             if match:
                 fence = match.group(1)
+                lines.append("")
             else:
                 lines.append(line)
-        elif _is_closing_fence(line, fence):
-            fence = None
+        else:
+            lines.append("")
+            if _is_closing_fence(line, fence):
+                fence = None
     return lines
 
 
