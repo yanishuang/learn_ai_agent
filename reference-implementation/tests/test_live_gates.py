@@ -384,6 +384,189 @@ async def test_responses_gateway_rejects_non_strict_tool_schema_before_request(
     assert client.responses.create_calls == []
 
 
+@pytest.mark.parametrize(
+    ("schema", "error_path"),
+    [
+        (
+            {
+                "type": "object",
+                "properties": {
+                    "choice": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {
+                                "type": "object",
+                                "properties": {"city": {"type": "string"}},
+                                "required": [],
+                                "additionalProperties": False,
+                            },
+                        ]
+                    }
+                },
+                "required": ["choice"],
+                "additionalProperties": False,
+            },
+            r"\$\.properties\.choice\.anyOf\[1\]\.required",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {
+                    "delivery": {
+                        "allOf": [
+                            {
+                                "type": "object",
+                                "properties": {"city": {"type": "string"}},
+                                "required": [],
+                                "additionalProperties": False,
+                            }
+                        ]
+                    }
+                },
+                "required": ["delivery"],
+                "additionalProperties": False,
+            },
+            r"\$\.properties\.delivery\.allOf\[0\]\.required",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {"address": {"$ref": "#/$defs/Address"}},
+                "required": ["address"],
+                "additionalProperties": False,
+                "$defs": {
+                    "Address": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": [],
+                        "additionalProperties": False,
+                    }
+                },
+            },
+            r"\$\.\$defs\.Address\.required",
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {"address": {"$ref": "#/definitions/Address"}},
+                "required": ["address"],
+                "additionalProperties": False,
+                "definitions": {
+                    "Address": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": [],
+                        "additionalProperties": False,
+                    }
+                },
+            },
+            r"\$\.definitions\.Address\.required",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_rejects_non_strict_composed_tool_schema_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+    schema: dict[str, object],
+    error_path: str,
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+    tool = ToolDefinition(
+        name="query_order_status",
+        description="Query an order",
+        input_schema=schema,
+    )
+
+    with pytest.raises(ValueError, match=error_path):
+        await gateway.next_step(
+            messages=[Message(role="user", content="Order O1001")],
+            tools=[tool],
+        )
+
+    assert client.responses.create_calls == []
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {
+            "type": "object",
+            "properties": {
+                "delivery": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": ["city"],
+                            "additionalProperties": False,
+                        },
+                        {
+                            "allOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {"postcode": {"type": "string"}},
+                                    "required": ["postcode"],
+                                    "additionalProperties": False,
+                                }
+                            ]
+                        },
+                    ]
+                }
+            },
+            "required": ["delivery"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "address": {"$ref": "#/$defs/Address"},
+                "recipient": {"$ref": "#/definitions/Recipient"},
+            },
+            "required": ["address", "recipient"],
+            "additionalProperties": False,
+            "$defs": {
+                "Address": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                    "additionalProperties": False,
+                }
+            },
+            "definitions": {
+                "Recipient": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                }
+            },
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_accepts_valid_composed_tool_schemas(
+    monkeypatch: pytest.MonkeyPatch,
+    schema: dict[str, object],
+) -> None:
+    set_live_environment(monkeypatch)
+    client = NoNetworkClient()
+    gateway = OpenAIResponsesGateway.from_environment(client=client)
+    tool = ToolDefinition(
+        name="query_order_status",
+        description="Query an order",
+        input_schema=schema,
+    )
+
+    await gateway.next_step(
+        messages=[Message(role="user", content="Order O1001")],
+        tools=[tool],
+    )
+
+    assert len(client.responses.create_calls) == 1
+
+
 @pytest.mark.asyncio
 async def test_responses_gateway_uses_native_structured_output_parse(
     monkeypatch: pytest.MonkeyPatch,

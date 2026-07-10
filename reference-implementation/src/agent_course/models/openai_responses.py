@@ -147,7 +147,13 @@ def _validate_strict_schema(schema: dict[str, object], path: str = "$") -> None:
     """Validate the documented strict-tool subset without changing the schema."""
 
     node_type = schema.get("type")
-    object_keywords = {"properties", "required", "additionalProperties"}
+    object_keywords = {
+        "properties",
+        "patternProperties",
+        "required",
+        "additionalProperties",
+        "dependentSchemas",
+    }
     is_object = path == "$" or node_type == "object" or bool(object_keywords & schema.keys())
 
     if is_object:
@@ -176,15 +182,51 @@ def _validate_strict_schema(schema: dict[str, object], path: str = "$") -> None:
                 f"missing {missing!r}"
             )
 
-        for name, child in properties.items():
-            child_path = f"{path}.properties.{name}"
-            if not isinstance(child, dict):
-                raise ValueError(f"strict tool schema {child_path} must be an object")
-            _validate_strict_schema(child, child_path)
+    for keyword in (
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+    ):
+        _validate_schema_map(schema, keyword, path)
 
-    if node_type == "array":
-        items = schema.get("items")
-        items_path = f"{path}.items"
-        if not isinstance(items, dict):
-            raise ValueError(f"strict tool schema {items_path} must be an object")
-        _validate_strict_schema(items, items_path)
+    for keyword in ("anyOf", "oneOf", "allOf", "prefixItems"):
+        _validate_schema_list(schema, keyword, path)
+
+    if "items" in schema:
+        _validate_schema_node(schema["items"], f"{path}.items")
+    elif node_type == "array":
+        raise ValueError(f"strict tool schema {path}.items must be an object")
+
+    for keyword in ("not", "if", "then", "else", "contains", "propertyNames"):
+        if keyword in schema:
+            _validate_schema_node(schema[keyword], f"{path}.{keyword}")
+
+
+def _validate_schema_map(schema: dict[str, object], keyword: str, path: str) -> None:
+    children = schema.get(keyword)
+    if children is None:
+        return
+    if not isinstance(children, dict):
+        raise ValueError(f"strict tool schema {path}.{keyword} must be an object")
+
+    for name, child in children.items():
+        _validate_schema_node(child, f"{path}.{keyword}.{name}")
+
+
+def _validate_schema_list(schema: dict[str, object], keyword: str, path: str) -> None:
+    children = schema.get(keyword)
+    if children is None:
+        return
+    if not isinstance(children, list):
+        raise ValueError(f"strict tool schema {path}.{keyword} must be an array")
+
+    for index, child in enumerate(children):
+        _validate_schema_node(child, f"{path}.{keyword}[{index}]")
+
+
+def _validate_schema_node(node: object, path: str) -> None:
+    if not isinstance(node, dict):
+        raise ValueError(f"strict tool schema {path} must be an object")
+    _validate_strict_schema(node, path)
