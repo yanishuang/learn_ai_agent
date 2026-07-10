@@ -612,8 +612,9 @@ git commit -m "feat: add deterministic course model gateway"
 - Consumes: `ModelGateway`, `RunContext`, and `RunLimits` from Task 8.
 - Produces:
   - `ToolRegistry.execute(name: str, arguments: dict, context: RunContext) -> ToolResult`
-  - `BoundedAgentRunner.run(question: str, context: RunContext, limits: RunLimits) -> AgentResult`
-  - `InMemorySessionStore.append(session_id: str, messages: list[Message]) -> None`
+  - `BoundedAgentRunner.run(question: str, context: RunContext, limits: RunLimits, *, session_id: str | None = None) -> AgentResult`
+  - typed `AgentResult` with final content, stop reason, messages, tool results, trace id, and optional continuation
+  - `SessionKey(tenant_id, user_id, session_id)` plus `InMemorySessionStore.load(key)` and `.append(key, messages)`; session keys derive identity only from trusted `RunContext`
   - `Guardrail.check_input(question: str, context: RunContext) -> GuardrailDecision`
   - `InMemoryTraceSink` with redacted events.
 
@@ -640,11 +641,11 @@ async def test_missing_permission_is_blocked(order_tool, context_without_permiss
 
 - [ ] **Step 2: Write bounded-run tests**
 
-Test correct tool use, repeated-call stop, max-turn stop, timeout, structured permission failure, blocked high-risk input, session continuation, and redacted trace arguments.
+Test correct tool use, repeated-call stop, max-turn stop, timeout, structured permission failure, blocked high-risk input, session continuation, tenant/user isolation for equal session ids, and redacted trace arguments. The normal order fixture must issue one tool call and then a deterministic final answer after its tool result; a separate repeated-call fixture must deliberately repeat the same call after its tool result.
 
 - [ ] **Step 3: Implement tools and runner**
 
-The registry rejects unknown fields before calling a handler. The runner applies input guardrails, loads and appends session messages, records each model step and tool result, increments budgets, and returns a typed stop reason. It keeps `ModelContinuation` as explicit run state and passes only newly produced tool-result messages when continuing a provider response. It never retries permission, policy, or validation failures.
+The registry rejects unknown fields before calling a handler. Tool arguments use strict Pydantic models with `extra="forbid"`; the order tool derives tenant and user identity only from `RunContext`, never from model arguments. The runner applies input guardrails, loads and appends messages using a trusted `SessionKey`, records each model step and tool result, increments budgets, and returns `AgentResult` with a typed stop reason. It keeps `ModelContinuation` as explicit run state and, for a provider continuation, passes only newly produced tool-result messages to the gateway; the fake path remains fully deterministic. It uses `asyncio.timeout` for the run budget and never retries permission, policy, or validation failures. Trace events redact tool arguments and secrets rather than storing raw values.
 
 - [ ] **Step 4: Run tests**
 
