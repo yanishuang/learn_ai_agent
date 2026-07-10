@@ -15,8 +15,8 @@
 
 最终建议沉淀两个作品，但实施优先级不同：
 
-1. **Know-Engine：企业级知识库问答系统**，作为 12 周主项目。
-2. **Dodo-Agent：企业级端到端通用智能体平台**，作为进阶 MVP 和后续扩展方向。
+1. **Know-Engine Core：企业级知识库问答系统**，作为必修 12 周主项目。
+2. **Dodo-Agent：进阶多 Agent 项目**，作为 Optional Advanced 扩展方向。
 
 ![AI Agent 学习路线](assets/agent-ecosystem-illustrations/01-learning-route.png)
 
@@ -79,13 +79,10 @@
 
 | 阶段 | 章节 | 核心产出 |
 | --- | --- | --- |
-| 课程准备 | 前置单元 | 配置环境、理解 Fake / Live 模式、运行默认验证 |
-| 基础篇 | 1-4 章 | 会调用模型、写 Prompt、做结构化输出、搭建 Python AI 服务骨架 |
-| 工具与 Agent 篇 | 5-6 章 | 完成可信工具调用和受控单 Agent Runtime |
-| RAG 与 Workflow 篇 | 7-8 章 | 完成核心 RAG 和持久化 Workflow |
-| 评估与协议篇 | 9-10 章 | 建立评估、安全、可观测性和 MCP 接入 |
-| 进阶与生产篇 | 11-13 章 | 完成高级 RAG、多 Agent 互操作与生产治理 |
-| 实战篇 | 14-15 章 | 优先完整交付 Know-Engine，进阶完成 Dodo-Agent MVP |
+| 课程准备 | 前置单元 | 配置环境、理解 Fake / Live 范围、运行当前根目录验证 |
+| 必修核心能力 | 1-10 章 | 模型、Prompt、工程栈、工具、单 Agent、RAG、Workflow、评估、安全与 MCP |
+| 必修整合与结项 | 13-14 章 | Know-Engine Core 整合、最终评估与演示 |
+| Optional Advanced | 11、12、15 章 | 高级 RAG、多 Agent 互操作与 Dodo-Agent；不属于必修 12 周路线 |
 
 课程开始前先完成：[课程准备：环境、运行模式与教学项目](chapters/00-course-setup.md)
 
@@ -381,28 +378,29 @@
 
 ### 项目目标
 
-构建一个基于 RAG 的企业级知识库问答系统，支持多格式文档接入、智能切片、混合检索、多源路由、流式问答和引用溯源。
+构建 Know-Engine Core：一个包含文档摄取与引用、权限感知 RAG、有边界的单 Agent、Workflow、MCP、评估与可观测性，以及生产评审的企业知识库系统。
 
 ### 核心功能
 
-- 文档上传：PDF、Word、Excel、CSV、Markdown、HTML。
-- 文档解析：文本、表格、标题层级、元数据。
-- 智能切片：固定切片、父子切片、表格保留。
-- 知识存储：对象存储 + 元数据表 + 向量库。
-- 检索增强：查询改写、向量检索、全文检索、Rerank。
-- 多源路由：文档、SQL、图谱、外部 API。
-- 问答体验：SSE 流式输出、进度展示、引用来源。
-- 管理能力：文档版本、重新索引、删除、权限。
+- 文档摄取与引用：解析、切片、索引和可追溯的来源返回。
+- 权限感知 RAG：在检索和工具层执行用户与租户授权。
+- 有边界的单 Agent：工具、轮数、时长和预算均受控。
+- Workflow：长任务状态、幂等、审批和失败恢复。
+- MCP：以受治理的协议接入外部工具或资源。
+- 评估与可观测性：离线评估、脱敏 trace、回归报告。
+- 生产评审：威胁模型、成本预算、数据保留、CI 和回滚证据。
+
+混合检索、重排和多源路由属于 Optional Advanced，不是必修 12 周要求。
 
 ### 建议里程碑
 
 | 里程碑 | 内容 | 验收标准 |
 | --- | --- | --- |
-| M1 | 文档上传与解析 | 能上传 PDF/Word/Excel/CSV 并抽取文本 |
-| M2 | 基础 RAG | 能基于文档回答问题并返回引用 |
-| M3 | 混合检索 | 支持向量 + 全文检索 |
-| M4 | 多源路由 | 能选择查文档、SQL 或图谱 |
-| M5 | 企业化 | 权限、日志、评估、流式进度完整 |
+| M1 | 文档摄取与引用 | 能解析、索引并返回可追溯来源 |
+| M2 | 权限感知 RAG | 检索与工具层都执行授权 |
+| M3 | 受控执行 | 单 Agent 与 Workflow 在预算和状态边界内运行 |
+| M4 | MCP、评估与可观测性 | 完成受治理工具接入、离线评估和脱敏 trace |
+| M5 | 生产评审 | 提交威胁模型、成本和运维证据 |
 
 ## 第 15 章：Dodo-Agent 进阶项目
 
@@ -410,39 +408,36 @@
 
 ### 项目目标
 
-构建一个企业级端到端通用智能体平台，支持多个 Agent 协作完成问答、文件分析、深度研究、报告生成和 PPT 生成。
+构建一个进阶多 Agent 项目：先由一个 Router 在 KnowledgeAgent 与 ReportAgent 之间分派任务，再逐步探索更多协作能力。
 
 ### 核心功能
 
-- BaseAgent 抽象：统一输入输出、工具、上下文、日志。
-- 智能问答 Agent：WebSearch + ReAct。
-- 文件问答 Agent：File RAG + ReAct。
-- 深度研究 Agent：Plan-Execute + 多轮搜索与总结。
-- PPT 生成 Agent：大纲、页面规划、内容生成、文件导出。
-- Agent Registry：注册、发现、路由、版本管理。
-- MCP 工具接入：通过 MCP Server 调用企业工具。
-- 会话与文件管理：会话历史、上传文件、任务记录。
-- 可观测性：展示 Agent 步骤、工具调用和失败原因。
+- Router：仅在 KnowledgeAgent 与 ReportAgent 之间进行明确分派。
+- KnowledgeAgent：基于知识与受控工具回答问题。
+- ReportAgent：把结构化结果组织为可审核报告。
+- MCP、会话记录和可观测性：保留工具边界与运行证据。
+
+ResearchAgent、Agent Registry 和 A2A 协作属于 Optional Advanced。
 
 ### 建议里程碑
 
 | 里程碑 | 内容 | 验收标准 |
 | --- | --- | --- |
-| M1 | BaseAgent 与工具系统 | 所有 Agent 使用统一执行接口 |
-| M2 | 单 Agent 能力 | 完成问答、文件问答、研究 Agent |
-| M3 | Workflow 编排 | 深度研究任务可分阶段执行 |
-| M4 | MCP 接入 | 至少 2 个企业工具通过 MCP 调用 |
-| M5 | 多 Agent 平台 | 用户输入任务后能自动路由和协作 |
+| M1 | Router + KnowledgeAgent | 能将知识任务路由并返回可核查答案 |
+| M2 | ReportAgent | 能把结构化结果整理成可审核报告 |
+| M3 | Workflow + MCP | 受控流程可调用受治理工具 |
+| M4 | Optional Advanced：ResearchAgent | 完成有边界的研究协作 |
+| M5 | Optional Advanced：Registry / A2A | 评估是否需要显式注册与跨 Agent 协作 |
 
 ## 项目实施优先级
 
-12 周内建议把 **Know-Engine 作为主项目完整交付**，把 **Dodo-Agent 作为进阶 MVP**。这样更符合学习和工程落地节奏。
+必修 12 周路线完整交付 **Know-Engine Core**。Dodo-Agent、混合/高级 RAG 与多 Agent 互操作均为 Optional Advanced 工作，安排在必修路线之外。
 
-| 优先级 | 项目 | 12 周目标 | 不建议在 12 周内承诺 |
+| 优先级 | 项目 | 路线内目标 | Optional Advanced |
 | --- | --- | --- | --- |
-| P0 | Know-Engine | 完成企业知识库问答 MVP，并具备混合检索、引用、权限、评估、流式输出 | 覆盖所有复杂文档格式、完整企业权限平台 |
-| P1 | Dodo-Agent | 完成单 Agent + Workflow + MCP 的可演示平台雏形 | 完整多 Agent 平台、PPT 生成、复杂企业 IM 全量集成 |
-| P2 | Go 扩展 | 实现 1 个只读 MCP Server 或工具微服务 | 大规模 Go 化所有工具和网关 |
+| P0 | Know-Engine Core | 摄取/引用、权限感知 RAG、受控单 Agent、Workflow、MCP、评估/可观测性和生产评审 | 混合或高级 RAG、多源路由 |
+| P1 | Dodo-Agent | Router、KnowledgeAgent 和 ReportAgent 的受控协作 | ResearchAgent、Registry、A2A |
+| P2 | Go 扩展 | 一个只读 MCP Server 或工具微服务 | 大规模 Go 化所有工具和网关 |
 
 每个项目都按三层验收推进：
 
@@ -456,18 +451,20 @@
 
 | 周次 | 学习主题 | 产出 |
 | --- | --- | --- |
-| 第 1 周 | AI Agent 全景、大模型调用、Prompt | 一个 FastAPI 基础问答 API |
-| 第 2 周 | Python AI 工程栈、结构化输出、流式响应 | 一个 Python AI 服务骨架 |
-| 第 3 周 | Tool Calling、工具权限、调用日志 | 3 个可调用业务工具 |
-| 第 4 周 | RAG 基础、文档解析、切片、向量库 | 知识库问答 MVP |
-| 第 5 周 | 高级 RAG、混合检索、Rerank | 检索增强版本 |
-| 第 6 周 | 多源路由、Text2SQL、Text2Cypher | 文档 + SQL + 图谱问答 |
-| 第 7 周 | ReAct Agent、记忆、失败恢复 | 单 Agent 执行循环 |
-| 第 8 周 | Workflow、Plan-Execute、报告生成 | 深度研究工作流 |
-| 第 9 周 | MCP Server / Client | 企业工具 MCP 化 |
-| 第 10 周 | 多 Agent 架构与互操作 | BaseAgent + 任务路由雏形，完成 MCP / A2A / Apps 的边界说明 |
-| 第 11 周 | 企业级工程化 | 权限、日志、评估、追踪 |
-| 第 12 周 | 项目整合与答辩 | Know-Engine 完整演示 + Dodo-Agent MVP 演示 |
+| 第 1 周 | 课程准备 + 第 1 章 | 环境基线、路线图和系统边界 |
+| 第 2 周 | 第 2 章 | 最小模型应用 |
+| 第 3 周 | 第 3 章 | 可测试的 Prompt 与上下文 |
+| 第 4 周 | 第 4 章 | Python AI 服务骨架 |
+| 第 5 周 | 第 5 章 | 受控工具调用 |
+| 第 6 周 | 第 6 章 | 有边界的单 Agent Runtime |
+| 第 7 周 | 第 7 章 | 带引用的核心 RAG |
+| 第 8 周 | 第 8 章 | 持久化 Workflow |
+| 第 9 周 | 第 9 章 | 评估、可观测性与安全 |
+| 第 10 周 | 第 10 章 | MCP 集成与信任治理 |
+| 第 11 周 | 第 13 章 + Know-Engine 项目整合 | 产品体验、生产治理与项目集成 |
+| 第 12 周 | 第 14 章最终评估与演示 | Know-Engine Core 最终评估与演示 |
+
+第 11、12 和 15 章是 Optional Advanced 工作，明确位于必修 12 周路线之外。
 
 ## Go 扩展学习安排
 
