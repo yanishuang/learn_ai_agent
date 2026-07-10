@@ -47,7 +47,33 @@ def test_start_creates_versioned_state_waiting_for_content_bound_approval() -> N
     assert run.state_version == 1
     assert run.approval is not None
     assert len(run.approval.content_hash) == 64
+    assert run.approval.run_id == run.run_id
+    assert run.approval.tenant_id == run.tenant_id
+    assert run.approval.workflow_version == run.workflow_version
+    assert run.approval.state_version == run.state_version
     assert run.approval.topic == "AI safety"
+
+
+def test_approval_hash_cannot_be_replayed_across_same_topic_runs() -> None:
+    workflow = ResearchWorkflow()
+    first_context = make_context(request_id="request-1")
+    second_context = make_context(request_id="request-2")
+    first = workflow.start("AI safety", first_context)
+    second = workflow.start("AI safety", second_context)
+
+    assert first.approval.content_hash != second.approval.content_hash
+    with pytest.raises(ApprovalPayloadMismatchError):
+        workflow.approve(
+            second.run_id,
+            ApprovalDecision(
+                approved=True,
+                payload_hash=first.approval.content_hash,
+                idempotency_key="approval-replay",
+            ),
+            second_context,
+        )
+
+    assert workflow.get(second.run_id, second_context) == second
 
 
 def test_approval_rejects_a_mismatched_payload_hash() -> None:
@@ -136,6 +162,11 @@ def test_workflow_checks_permission_tenant_and_owner_boundaries() -> None:
             make_context(tenant_id="tenant-2", request_id="wrong-tenant"),
         )
     with pytest.raises(WorkflowAccessError):
+        workflow.get(
+            run.run_id,
+            make_context(user_id="user-2", request_id="wrong-owner-get"),
+        )
+    with pytest.raises(WorkflowAccessError):
         workflow.resume(
             run.run_id,
             make_context(user_id="user-2", request_id="wrong-owner"),
@@ -154,6 +185,64 @@ def test_waiting_run_times_out_using_an_injected_clock() -> None:
     assert timed_out.status is WorkflowStatus.TIMED_OUT
     assert timed_out.error_code == "WORKFLOW_TIMEOUT"
     assert timed_out.state_version == 2
+
+
+def test_approval_after_deadline_materializes_timeout() -> None:
+    clock = ManualClock()
+    workflow = ResearchWorkflow(timeout_seconds=10, clock=clock)
+    context = make_context()
+    run = workflow.start("AI safety", context)
+
+    clock.advance(10)
+    timed_out = workflow.approve(
+        run.run_id,
+        ApprovalDecision(
+            approved=True,
+            payload_hash=run.approval.content_hash,
+            idempotency_key="late-approval",
+        ),
+        context,
+    )
+
+    assert timed_out.status is WorkflowStatus.TIMED_OUT
+    assert timed_out.error_code == "WORKFLOW_TIMEOUT"
+    assert timed_out.approved_by is None
+    assert timed_out.state_version == 2
+    assert workflow.approve(
+        run.run_id,
+        ApprovalDecision(
+            approved=True,
+            payload_hash=run.approval.content_hash,
+            idempotency_key="late-approval-retry",
+        ),
+        context,
+    ) == timed_out
+
+
+def test_cancel_after_deadline_materializes_timeout_from_running_state() -> None:
+    clock = ManualClock()
+    workflow = ResearchWorkflow(timeout_seconds=10, clock=clock)
+    context = make_context()
+    run = workflow.start("AI safety", context)
+    running = workflow.approve(
+        run.run_id,
+        ApprovalDecision(
+            approved=True,
+            payload_hash=run.approval.content_hash,
+            idempotency_key="approval-1",
+        ),
+        context,
+    )
+
+    clock.advance(10)
+    timed_out = workflow.cancel(run.run_id, context)
+
+    assert running.status is WorkflowStatus.RUNNING
+    assert timed_out.status is WorkflowStatus.TIMED_OUT
+    assert timed_out.error_code == "WORKFLOW_TIMEOUT"
+    assert timed_out.cancelled_by is None
+    assert timed_out.state_version == 3
+    assert workflow.cancel(run.run_id, context) == timed_out
 
 
 def test_owner_can_cancel_and_cancel_is_idempotent() -> None:

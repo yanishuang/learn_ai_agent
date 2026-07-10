@@ -127,6 +127,27 @@ def test_answer_refuses_when_authorized_sources_do_not_answer_the_question() -> 
     assert answer.citations == ()
 
 
+def test_answer_refuses_misleading_single_term_overlap() -> None:
+    retriever = InMemoryRetriever(
+        [
+            DocumentChunk(
+                chunk_id="leave",
+                document_id="hr-policy",
+                tenant_id="tenant-1",
+                title="Annual Leave",
+                content="Employees receive 15 days of paid annual leave each year.",
+            )
+        ]
+    )
+
+    assert retriever.search("leave password", make_context(), top_k=3) == []
+    answer = retriever.answer("leave password", make_context())
+
+    assert answer.refused is True
+    assert answer.answer == "根据当前资料无法确认。"
+    assert answer.citations == ()
+
+
 def test_answer_is_grounded_in_the_top_hit_and_citation() -> None:
     content = "Employees receive 15 days of paid annual leave each year."
     retriever = InMemoryRetriever(

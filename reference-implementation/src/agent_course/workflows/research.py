@@ -43,9 +43,26 @@ class IdempotencyConflictError(WorkflowError):
     pass
 
 
-def _payload_hash(*, action: str, topic: str, summary: str) -> str:
+def _payload_hash(
+    *,
+    run_id: str,
+    tenant_id: str,
+    workflow_version: str,
+    state_version: int,
+    action: str,
+    topic: str,
+    summary: str,
+) -> str:
     canonical = json.dumps(
-        {"action": action, "summary": summary, "topic": topic},
+        {
+            "action": action,
+            "run_id": run_id,
+            "state_version": state_version,
+            "summary": summary,
+            "tenant_id": tenant_id,
+            "topic": topic,
+            "workflow_version": workflow_version,
+        },
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
@@ -58,6 +75,10 @@ class WorkflowModel(FrozenModel):
 
 
 class ApprovalPayload(WorkflowModel):
+    run_id: str
+    tenant_id: str
+    workflow_version: str
+    state_version: int = Field(ge=1)
     action: str
     topic: str
     summary: str
@@ -66,6 +87,10 @@ class ApprovalPayload(WorkflowModel):
     @model_validator(mode="after")
     def content_hash_must_match_payload(self) -> "ApprovalPayload":
         expected = _payload_hash(
+            run_id=self.run_id,
+            tenant_id=self.tenant_id,
+            workflow_version=self.workflow_version,
+            state_version=self.state_version,
             action=self.action,
             topic=self.topic,
             summary=self.summary,
@@ -121,9 +146,7 @@ class ResearchWorkflow:
         self._runs: dict[str, WorkflowRun] = {}
         self._deadlines: dict[str, float] = {}
         self._start_keys: dict[tuple[str, str, str], tuple[str, str]] = {}
-        self._approval_keys: dict[
-            tuple[str, str], tuple[tuple[str, bool, str], WorkflowRun]
-        ] = {}
+        self._approval_keys: dict[tuple[str, str], tuple[str, bool, str]] = {}
 
     def start(self, topic: str, context: RunContext) -> WorkflowRun:
         context.require("research:run")
@@ -142,12 +165,21 @@ class ResearchWorkflow:
             return self._runs[run_id]
 
         run_id = self._run_id(context)
+        state_version = 1
         summary = f"Approve the deterministic research report for: {normalized_topic}"
         approval = ApprovalPayload(
+            run_id=run_id,
+            tenant_id=context.tenant_id,
+            workflow_version=self.workflow_version,
+            state_version=state_version,
             action="publish_research_report",
             topic=normalized_topic,
             summary=summary,
             content_hash=_payload_hash(
+                run_id=run_id,
+                tenant_id=context.tenant_id,
+                workflow_version=self.workflow_version,
+                state_version=state_version,
                 action="publish_research_report",
                 topic=normalized_topic,
                 summary=summary,
@@ -156,7 +188,7 @@ class ResearchWorkflow:
         run = WorkflowRun(
             run_id=run_id,
             workflow_version=self.workflow_version,
-            state_version=1,
+            state_version=state_version,
             status=WorkflowStatus.WAITING_FOR_APPROVAL,
             tenant_id=context.tenant_id,
             user_id=context.user_id,
@@ -172,6 +204,7 @@ class ResearchWorkflow:
         context.require("research:run")
         run = self._load(run_id)
         self._require_tenant(run, context)
+        self._require_owner(run, context)
         return run
 
     def approve(
@@ -183,22 +216,24 @@ class ResearchWorkflow:
         context.require("research:approve")
         run = self._load(run_id)
         self._require_tenant(run, context)
+        run = self._materialize_timeout(run)
 
         key = (context.tenant_id, decision.idempotency_key)
         fingerprint = (run_id, decision.approved, decision.payload_hash)
         previous = self._approval_keys.get(key)
         if previous is not None:
-            previous_fingerprint, previous_run = previous
-            if previous_fingerprint != fingerprint:
+            if previous != fingerprint:
                 raise IdempotencyConflictError(
                     "approval idempotency key was reused with different content"
                 )
-            return previous_run
+            return run
 
         if run.approval is None or decision.payload_hash != run.approval.content_hash:
             raise ApprovalPayloadMismatchError(
                 "approval decision does not match the persisted payload"
             )
+        if run.status is WorkflowStatus.TIMED_OUT:
+            return run
         if run.status is not WorkflowStatus.WAITING_FOR_APPROVAL:
             raise WorkflowStateError("workflow is not waiting for approval")
 
@@ -219,7 +254,7 @@ class ResearchWorkflow:
                 }
             )
         self._runs[run_id] = updated
-        self._approval_keys[key] = (fingerprint, updated)
+        self._approval_keys[key] = fingerprint
         return updated
 
     def resume(self, run_id: str, context: RunContext) -> WorkflowRun:
@@ -227,6 +262,7 @@ class ResearchWorkflow:
         run = self._load(run_id)
         self._require_tenant(run, context)
         self._require_owner(run, context)
+        run = self._materialize_timeout(run)
 
         if run.status in {
             WorkflowStatus.COMPLETED,
@@ -234,12 +270,6 @@ class ResearchWorkflow:
             WorkflowStatus.TIMED_OUT,
         }:
             return run
-        if self._clock() >= self._deadlines[run_id]:
-            return self._update(
-                run,
-                status=WorkflowStatus.TIMED_OUT,
-                error_code="WORKFLOW_TIMEOUT",
-            )
         if run.status is WorkflowStatus.WAITING_FOR_APPROVAL:
             return run
         if run.status is not WorkflowStatus.RUNNING:
@@ -255,6 +285,7 @@ class ResearchWorkflow:
         run = self._load(run_id)
         self._require_tenant(run, context)
         self._require_owner(run, context)
+        run = self._materialize_timeout(run)
         if run.status in {
             WorkflowStatus.COMPLETED,
             WorkflowStatus.CANCELLED,
@@ -279,6 +310,21 @@ class ResearchWorkflow:
         )
         self._runs[run.run_id] = updated
         return updated
+
+    def _materialize_timeout(self, run: WorkflowRun) -> WorkflowRun:
+        if run.status in {
+            WorkflowStatus.COMPLETED,
+            WorkflowStatus.CANCELLED,
+            WorkflowStatus.TIMED_OUT,
+        }:
+            return run
+        if self._clock() < self._deadlines[run.run_id]:
+            return run
+        return self._update(
+            run,
+            status=WorkflowStatus.TIMED_OUT,
+            error_code="WORKFLOW_TIMEOUT",
+        )
 
     @staticmethod
     def _require_tenant(run: WorkflowRun, context: RunContext) -> None:

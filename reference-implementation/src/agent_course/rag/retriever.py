@@ -26,6 +26,14 @@ def _overlap_score(query_tokens: frozenset[str], content: str) -> float:
     return len(query_tokens & _tokens(content)) / len(query_tokens)
 
 
+def _has_enough_matching_terms(
+    query_tokens: frozenset[str], content: str
+) -> bool:
+    matched_terms = len(query_tokens & _tokens(content))
+    required_terms = min(2, len(query_tokens))
+    return matched_terms >= required_terms
+
+
 def _best_quote(content: str, query_tokens: frozenset[str]) -> str:
     candidates = [part.strip() for part in _SENTENCE_BOUNDARY.split(content)]
     candidates = [part for part in candidates if part]
@@ -66,7 +74,9 @@ class InMemoryRetriever:
             if not self._is_visible(chunk, context):
                 continue
             score = _overlap_score(query_tokens, chunk.content)
-            if score >= self._min_score:
+            if score >= self._min_score and _has_enough_matching_terms(
+                query_tokens, chunk.content
+            ):
                 scored.append((score, chunk))
 
         scored.sort(key=lambda item: (-item[0], item[1].document_id, item[1].chunk_id))
