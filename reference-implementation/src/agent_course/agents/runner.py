@@ -136,7 +136,8 @@ class BoundedAgentRunner:
             )
             state.continuation = step.continuation
             state.model_tool_calls.extend(
-                call.model_copy(deep=True) for call in step.tool_calls
+                ToolCall.model_validate(call.model_dump(mode="json"))
+                for call in step.tool_calls
             )
             state.output_tokens += step.usage.output_tokens
             self.traces.record(

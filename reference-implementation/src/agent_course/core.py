@@ -1,7 +1,7 @@
 """Provider-neutral contracts shared by the course implementation."""
 
 from enum import StrEnum
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, NoReturn, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
@@ -24,10 +24,73 @@ class ToolDefinition(FrozenModel):
     input_schema: dict[str, JsonValue]
 
 
+class _FrozenJsonDict(dict[str, JsonValue]):
+    """JSON object that cannot be changed after crossing an agent boundary."""
+
+    def __init__(self, values: dict[str, JsonValue]) -> None:
+        dict.__init__(self, values)
+
+    @staticmethod
+    def _immutable(*args: object, **kwargs: object) -> NoReturn:
+        raise TypeError("JSON argument values are immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __ior__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+
+
+class _FrozenJsonList(list[JsonValue]):
+    """JSON array that cannot be changed after crossing an agent boundary."""
+
+    def __init__(self, values: list[JsonValue]) -> None:
+        list.__init__(self, values)
+
+    @staticmethod
+    def _immutable(*args: object, **kwargs: object) -> NoReturn:
+        raise TypeError("JSON argument values are immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+
+
+def _freeze_json_value(value: JsonValue) -> JsonValue:
+    if isinstance(value, dict):
+        return _FrozenJsonDict(
+            {key: _freeze_json_value(item) for key, item in value.items()}
+        )
+    if isinstance(value, list):
+        return _FrozenJsonList([_freeze_json_value(item) for item in value])
+    return value
+
+
 class ToolCall(FrozenModel):
     id: str
     name: str
     arguments: dict[str, JsonValue]
+
+    @field_validator("arguments")
+    @classmethod
+    def arguments_are_deeply_immutable(
+        cls, value: dict[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        return _FrozenJsonDict(
+            {key: _freeze_json_value(item) for key, item in value.items()}
+        )
 
 
 class ModelContinuation(FrozenModel):

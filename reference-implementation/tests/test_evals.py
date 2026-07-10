@@ -215,6 +215,77 @@ async def test_eval_report_detects_wrong_tool_arguments_and_excess_turns() -> No
     )
 
 
+async def test_eval_argument_accuracy_rejects_unexpected_arguments() -> None:
+    result = make_result(
+        content="done",
+        stop_reason=StopReason.COMPLETED,
+        messages=(Message(role="user", content="extra-arguments"),),
+        model_tool_calls=(
+            ToolCall(
+                id="call-1",
+                name="query_order_status",
+                arguments={
+                    "order_id": "O1001",
+                    "tenant_id": "attacker",
+                },
+            ),
+        ),
+        model_turn_count=1,
+    )
+    case = EvalCase(
+        case_id="extra-arguments",
+        question="extra-arguments",
+        context=make_context(),
+        limits=make_limits(),
+        expected_tool_name="query_order_status",
+        expected_tool_arguments={"order_id": "O1001"},
+        max_turns=1,
+    )
+
+    report = await evaluate_cases(
+        [case], FakeEvaluationApplication({"extra-arguments": result})
+    )
+
+    assert report.results[0].tool_selection_correct is True
+    assert report.results[0].arguments_correct is False
+    assert report.results[0].failures == ("argument_accuracy",)
+
+
+async def test_eval_argument_accuracy_requires_canonical_nested_json() -> None:
+    result = make_result(
+        content="done",
+        stop_reason=StopReason.COMPLETED,
+        messages=(Message(role="user", content="canonical-arguments"),),
+        model_tool_calls=(
+            ToolCall(
+                id="call-1",
+                name="query_order_status",
+                arguments={
+                    "filters": {"include_archived": 1, "order_ids": ["O1001"]},
+                },
+            ),
+        ),
+        model_turn_count=1,
+    )
+    case = EvalCase(
+        case_id="canonical-arguments",
+        question="canonical-arguments",
+        context=make_context(),
+        limits=make_limits(),
+        expected_tool_name="query_order_status",
+        expected_tool_arguments={
+            "filters": {"include_archived": True, "order_ids": ["O1001"]},
+        },
+        max_turns=1,
+    )
+
+    report = await evaluate_cases(
+        [case], FakeEvaluationApplication({"canonical-arguments": result})
+    )
+
+    assert report.results[0].arguments_correct is False
+
+
 async def test_report_serialization_and_case_order_are_stable() -> None:
     result = make_result(
         content="ok",

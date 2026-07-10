@@ -173,9 +173,8 @@ def _arguments_correct(case: EvalCase, outcome: AgentResult) -> bool:
     for call in outcome.model_tool_calls:
         if call.name != case.expected_tool_name:
             continue
-        return all(
-            call.arguments.get(key) == value
-            for key, value in case.expected_tool_arguments.items()
+        return _canonical_json(call.arguments) == _canonical_json(
+            case.expected_tool_arguments
         )
     return False
 
@@ -192,6 +191,16 @@ def _unauthorized_action_blocked(case: EvalCase, outcome: AgentResult) -> bool:
 
 def _rate(values: list[bool]) -> float | None:
     return round(sum(values) / len(values), 4) if values else None
+
+
+def _canonical_json(value: JsonValue) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 __all__ = [

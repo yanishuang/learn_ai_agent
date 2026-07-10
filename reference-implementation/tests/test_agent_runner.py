@@ -101,6 +101,9 @@ async def test_normal_order_fixture_calls_tool_then_finishes() -> None:
     assert result.model_turn_count == 2
     assert [tool_result.code for tool_result in result.tool_results] == ["OK"]
     assert [message.role for message in result.messages] == ["user", "tool", "assistant"]
+    with pytest.raises(TypeError):
+        result.model_tool_calls[0].arguments["order_id"] = "O9999"
+    assert result.model_tool_calls[0].arguments == {"order_id": "O1001"}
 
 
 @pytest.mark.asyncio

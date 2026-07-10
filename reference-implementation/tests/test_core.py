@@ -40,6 +40,29 @@ def test_core_models_are_frozen(model: object) -> None:
         model.__setattr__(next(iter(model.__class__.model_fields)), "changed")
 
 
+def test_tool_call_arguments_are_deeply_immutable_and_json_compatible() -> None:
+    arguments = {
+        "order": {"id": "O1001"},
+        "items": [{"sku": "SKU-1"}],
+    }
+    call = ToolCall(
+        id="call-1",
+        name="lookup",
+        arguments=arguments,
+    )
+    arguments["order"]["id"] = "O9999"
+
+    with pytest.raises(TypeError):
+        call.arguments["order"]["id"] = "O9999"
+    with pytest.raises(TypeError):
+        call.arguments["items"].append({"sku": "SKU-2"})
+
+    assert call.model_dump(mode="json")["arguments"] == {
+        "order": {"id": "O1001"},
+        "items": [{"sku": "SKU-1"}],
+    }
+
+
 @pytest.mark.parametrize("field", ["user_id", "tenant_id", "request_id"])
 @pytest.mark.parametrize("value", ["", "   "])
 def test_run_context_rejects_blank_trusted_identifiers(field: str, value: str) -> None:
