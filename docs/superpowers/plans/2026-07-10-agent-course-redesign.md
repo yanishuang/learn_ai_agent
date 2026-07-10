@@ -17,7 +17,7 @@
 - User identity, tenant identity, permissions, and approval state come from trusted `RunContext`, never model-generated tool arguments.
 - Python is the only required implementation language; Go remains an optional extension.
 - MCP `2025-11-25` remains the stable teaching baseline until the repository is deliberately re-verified after the next final specification release.
-- A2A remains optional while its published specification is pre-1.0.
+- A2A Protocol 1.0 is stable, but remains an optional interoperability extension rather than a required course dependency.
 - Every chapter has prerequisites, measurable outcomes, a demonstration, a lab, failure injection, verification, assignment, rubric, completion levels, recap, and primary sources.
 - Existing illustration assets are preserved unless a replacement materially improves teaching clarity.
 - Existing unrelated user changes must not be reverted.
@@ -427,7 +427,7 @@ Weighted score fusion must state that scores require normalization and validatio
 
 - [ ] **Step 3: Add maturity gates to Chapter 12**
 
-Keep A2A optional and pre-1.0. Teach agents-as-tools and handoffs before remote interoperability. Label Microsoft Agent Framework preview status and Google ADK A2A support maturity from primary docs. Do not make framework-specific APIs required work.
+Keep A2A Protocol 1.0 optional even though its published specification is stable. Teach agents-as-tools and handoffs before remote interoperability, and explain that A2A complements MCP rather than replacing it. Label Microsoft Agent Framework preview status and Google ADK A2A support maturity from primary docs. Do not make framework-specific APIs required work.
 
 - [ ] **Step 4: Commit**
 

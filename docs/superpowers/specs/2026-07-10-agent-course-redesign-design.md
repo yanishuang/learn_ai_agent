@@ -178,7 +178,7 @@ The course contains one unnumbered prerequisite unit and fifteen numbered chapte
 - Agents-as-tools, handoffs, ownership, routing, and structured contracts.
 - Evaluation by specialist and end-to-end workflow.
 - MCP versus A2A versus interactive app surfaces.
-- A2A remains optional while pre-1.0.
+- A2A Protocol 1.0 is stable, but remains optional because remote agent interoperability is not required for the core learning outcomes.
 - Framework maturity and ecosystem comparison.
 
 ### Chapter 13: Product experience, enterprise integration, and production governance
