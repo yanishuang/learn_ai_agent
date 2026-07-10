@@ -4,7 +4,7 @@ import json
 import re
 import sys
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlparse
 
 
@@ -71,9 +71,19 @@ def _lines_outside_fenced_code_blocks(markdown_file: Path) -> list[str]:
                 fence = match.group(1)
             else:
                 lines.append(line)
-        elif match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):
+        elif _is_closing_fence(line, fence):
             fence = None
     return lines
+
+
+def _is_closing_fence(line: str, opening_fence: str) -> bool:
+    stripped_line = line.lstrip()
+    fence_character = opening_fence[0]
+    fence_length = len(stripped_line) - len(stripped_line.lstrip(fence_character))
+    return (
+        fence_length >= len(opening_fence)
+        and stripped_line[fence_length:].strip() == ""
+    )
 
 
 def _validate_jsonl(root: Path, jsonl_file: Path) -> list[str]:
@@ -103,6 +113,7 @@ def _validate_course_manifest(root: Path) -> list[str]:
         return ["docs/course-manifest.json: manifest must be a list"]
 
     errors: list[str] = []
+    resolved_root = root.resolve()
     for entry_number, chapter in enumerate(manifest, start=1):
         if not isinstance(chapter, Mapping):
             errors.append(
@@ -126,7 +137,23 @@ def _validate_course_manifest(root: Path) -> list[str]:
             continue
 
         chapter_path = Path(path)
+        if chapter_path.is_absolute() or PureWindowsPath(path).is_absolute():
+            errors.append(
+                f"docs/course-manifest.json: entry {entry_number} path must be repository-relative"
+            )
+            continue
+        if ".." in chapter_path.parts:
+            errors.append(
+                f"docs/course-manifest.json: entry {entry_number} path must not contain parent traversal"
+            )
+            continue
+
         chapter_file = root / chapter_path
+        if not _is_within_root(chapter_file, resolved_root):
+            errors.append(
+                f"docs/course-manifest.json: entry {entry_number} path escapes repository root"
+            )
+            continue
         if not chapter_file.is_file():
             errors.append(
                 f"docs/course-manifest.json: missing chapter {chapter_path.as_posix()}"
@@ -142,6 +169,14 @@ def _validate_course_manifest(root: Path) -> list[str]:
     return errors
 
 
+def _is_within_root(path: Path, resolved_root: Path) -> bool:
+    try:
+        path.resolve().relative_to(resolved_root)
+    except ValueError:
+        return False
+    return True
+
+
 def _validate_ecosystem_maturity(root: Path) -> list[str]:
     matrix_file = root / "docs" / "ecosystem-maturity.md"
     if not matrix_file.is_file():
@@ -149,11 +184,15 @@ def _validate_ecosystem_maturity(root: Path) -> list[str]:
 
     lines = matrix_file.read_text(encoding="utf-8").splitlines()
     header_index = next(
-        (index for index, line in enumerate(lines) if _table_cells(line)),
+        (
+            index
+            for index, line in enumerate(lines[:-1])
+            if _table_cells(line) and _is_table_separator(_table_cells(lines[index + 1]))
+        ),
         None,
     )
     if header_index is None:
-        return []
+        return ["docs/ecosystem-maturity.md: missing maturity table"]
 
     header_cells = _table_cells(lines[header_index])
     if "Maturity" not in header_cells:
@@ -165,7 +204,7 @@ def _validate_ecosystem_maturity(root: Path) -> list[str]:
         cells = _table_cells(line)
         if not cells:
             break
-        if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+        if _is_table_separator(cells):
             continue
         maturity = cells[maturity_index] if maturity_index < len(cells) else ""
         if not maturity:
@@ -181,6 +220,10 @@ def _table_cells(line: str) -> list[str]:
     if not line.strip().startswith("|") or not line.strip().endswith("|"):
         return []
     return [cell.strip() for cell in line.strip()[1:-1].split("|")]
+
+
+def _is_table_separator(cells: list[str]) -> bool:
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)
 
 
 def main() -> int:
