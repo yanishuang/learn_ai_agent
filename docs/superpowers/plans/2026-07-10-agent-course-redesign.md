@@ -117,6 +117,7 @@ git commit -m "test: add course structure validation"
 ### Task 2: Migrate To The Approved Fifteen-Chapter Structure
 
 **Files:**
+- Modify: `README.md` (chapter numbers, titles, and links only; Task 3 owns the portal rewrite)
 - Create: `chapters/00-course-setup.md`
 - Rename: `chapters/08-agent-basics.md` -> `chapters/06-agent-runtime.md`
 - Rename: `chapters/06-rag-basics.md` -> `chapters/07-rag-core.md`
@@ -172,7 +173,7 @@ The JSON file contains ordered objects with `number`, `path`, `title`, and `trac
 
 - [ ] **Step 4: Renumber headings, recaps, and cross-references**
 
-Update all moved chapter numbers, including prose such as “第 8 章”, recap headings, paths, and source fixture names. Do not perform a blind global replacement; check each semantic reference.
+Update all moved chapter numbers, including the corresponding README chapter headings and links, prose such as “第 8 章”, recap headings, paths, and source fixture names. Do not perform a blind global replacement; check each semantic reference. Keep README changes limited to migration correctness because Task 3 owns its full rewrite.
 
 - [ ] **Step 5: Run structural searches**
 
@@ -186,7 +187,7 @@ Expected: stale heading search returns no obsolete title; validator has no missi
 - [ ] **Step 6: Commit**
 
 ```bash
-git add chapters docs/course-manifest.json docs/python-go-feasibility.md
+git add README.md chapters docs/course-manifest.json docs/python-go-feasibility.md
 git commit -m "docs: restructure agent course chapters"
 ```
 
