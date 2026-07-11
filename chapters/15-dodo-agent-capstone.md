@@ -37,19 +37,22 @@ Dodo-Agent 是可选进阶项目，不属于必修 12 周路线。它只回答�
 
 ```text
                          /-- knowledge --> KnowledgeAgent --> KnowledgeResult
-User task --> Router ---+--- report -----> ReportAgent ----> ReportResult
+User task --> Router ---+--- report -----> validate direct material --\
                          \-- clarify ----> User
 
-KnowledgeResult -- fixed composition --> ReportAgent --> ReportResult
+KnowledgeResult --> convert/validate --+--> ReportTask.source_material
+validated direct material -------------/             |
+                                                     v
+                                                ReportAgent --> ReportResult
 
 Platform owns: RunContext, total budget, dispatch, schemas, trace, cancellation
 Workflow owns: approvals, waiting, retries, durable side effects
 MCP/tools own: bounded external capabilities, not task ownership
 ```
 
-Router 只输出 `knowledge`、`report` 或 `clarify`，Core 必须分别测试三条路径。`report` 是直接路由：请求已经带有平台校验过的 source material 时，平台把严格 `ReportTask` 交给 ReportAgent，不先调用 KnowledgeAgent；缺少 source material 时必须 validation fail 或 `clarify`，不能让 ReportAgent 自行检索。如果请求需要先取知识再写报告，平台执行固定两步 composition：KnowledgeAgent 先返回严格 `KnowledgeResult`，再将其转换为 ReportAgent 允许的 source material。Router 不生成新 Agent、不写 Python、不选择任意 endpoint 或工具。
+Router 只输出 `knowledge`、`report` 或 `clarify`，Core 必须分别测试三条路径。`report` 是直接路由：平台校验请求携带的 direct material，用它构造并验证 `ReportTask.source_material`，再把完整 `ReportTask` 交给 ReportAgent；缺少或无效 material 时必须 validation fail 或 `clarify`，不能让 ReportAgent 自行检索。如果请求需要先取知识再写报告，平台执行固定两步 composition：KnowledgeAgent 先返回严格 `KnowledgeResult`，composition adapter 再将它转换为 `ReportTask.source_material` 并验证完整 `ReportTask`。Router 不生成新 Agent、不写 Python、不选择任意 endpoint 或工具。
 
-KnowledgeAgent 只做 permission-aware retrieval 与受控只读工具，返回 answer、citations、refused、child trace 和 stop reason。ReportAgent 不重新检索、不执行副作用，只把结构化来源组织为 report sections，并保留 citation IDs。高风险动作交给显式 Workflow + 权威审批，本项目不允许 Agent 自动批准或执行。
+KnowledgeAgent 只做 permission-aware retrieval 与受控只读工具，返回 answer、citations、refused、child trace 和 stop reason。**ReportAgent 的唯一权威输入是已通过 schema 校验的 `ReportTask`；它不接受原始 direct material、`KnowledgeResult` 或自由文本。** `source_material` 必须是 `ReportTask` 的显式字段，包含允许用于报告的结构化内容、citation/source IDs 和来源类型（`direct` 或 `knowledge`）。ReportAgent 不重新检索、不执行副作用，只把该字段中的结构化来源组织为 report sections，并保留 citation IDs。高风险动作交给显式 Workflow + 权威审批，本项目不允许 Agent 自动批准或执行。
 
 ### 15.2 结构化合同
 
@@ -60,16 +63,25 @@ KnowledgeAgent 只做 permission-aware retrieval 与受控只读工具，返回 
 | `RouteDecision` | route、reason、confidence label | route 仅 knowledge/report/clarify；confidence 不是授权 |
 | `KnowledgeTask` | objective、allowed_source_ids | 不含 tenant/user/permissions |
 | `KnowledgeResult` | status、answer、citations、trace_id | citation 可回溯；refused 合法 |
-| `ReportTask` | objective、source_material、format | direct report 接收调用方提供且平台校验过的材料；composition 接收由 `KnowledgeResult` 转换的材料 |
+| `ReportTask` | objective、`source_material`、format | `source_material` 显式包含结构化 content、citation/source IDs、origin=`direct|knowledge`；整个 task 必须先校验，ReportAgent 不接受其他输入类型 |
 | `ReportResult` | status、sections、citation_ids、trace_id | 不得发明来源或动作 |
 
 身份从父 `RunContext` 传递；specialist 不能请求扩权。父 `RunLimits` 分配给 route 与 child，不能每个 Agent 重置完整 budget。平台校验 child stop reason、schema、citation 与权限证据后才进入下一步。
+
+两条路径只能在构造材料的步骤不同，ReportAgent 调用合同完全相同：
+
+```text
+direct report: validate_direct_material(input) -> validate ReportTask(source_material=..., origin="direct") -> ReportAgent
+knowledge path: KnowledgeResult -> to_report_source_material(...) -> validate ReportTask(origin="knowledge") -> ReportAgent
+```
+
+`to_report_source_material(...)` 只复制允许的 answer/citation/source/trace references，并拒绝 failed/refused、无 citation 或越权的 `KnowledgeResult`。任何 adapter 都不能绕过 `ReportTask` validation 直接调用 ReportAgent。
 
 ### 15.3 Router：建议与权威 dispatch
 
 优先使用确定性规则处理明确意图，再用受限分类模型处理剩余 case；低置信度或多义输入返回 `clarify`。模型的 route 只是建议，平台检查 target allowlist、版本、权限、enabled 状态与剩余预算后 dispatch。
 
-Core target 固定写在配置中，不需要 Registry。测试集必须包含可直接分派给 KnowledgeAgent 的知识请求、可直接分派给 ReportAgent 且带 validated source material 的报告请求，以及需要 `clarify` 的不完整/多义请求。任何 unknown target、`report` 缺少 source material、额外字段、disabled Agent、schema mismatch 或预算不足都结构化失败。路由评估至少报告 `knowledge`/`report`/`clarify` 的 per-class precision/recall、clarify rate、错误路由成本和 latency，不能只给总体准确率。
+Core target 固定写在配置中，不需要 Registry。测试集必须包含可直接分派给 KnowledgeAgent 的知识请求、从 validated direct material 构造 `ReportTask` 后分派给 ReportAgent 的报告请求，以及需要 `clarify` 的不完整/多义请求。任何 unknown target、`report` 缺少 source material、额外字段、disabled Agent、schema mismatch 或预算不足都结构化失败。路由评估至少报告 `knowledge`/`report`/`clarify` 的 per-class precision/recall、clarify rate、错误路由成本和 latency，不能只给总体准确率。
 
 ### 15.4 最小协作：先 agents-as-tools/固定 composition
 
@@ -83,15 +95,15 @@ Core 保留 orchestrator 所有权。KnowledgeAgent 和 ReportAgent 可作为 ty
 
 - Router：`knowledge`/`report`/`clarify` 三类 route、direct dispatch、unknown/disabled target、latency；
 - KnowledgeAgent：retrieval/citation、refusal、权限、tool/argument、budget；
-- ReportAgent：结构完整、citation preservation、无 unsupported claim；
-- composition：任务成功、总 turns/tools/tokens/time、取消、失败传播、parent/child trace；
+- ReportAgent：只接受 validated `ReportTask`、显式 `source_material`、结构完整、citation preservation、无 unsupported claim；
+- composition：`KnowledgeResult -> ReportTask.source_material` 转换、任务成功、总 turns/tools/tokens/time、取消、失败传播、parent/child trace；
 - baseline delta：质量、p95 latency、成本、失败率和维护复杂度。
 
 只有至少一个预注册指标显著改善且新增风险可控，才保留多 Agent。否则项目的正确结论可以是回退到单 Agent。
 
 ### 15.6 Advanced 1：ResearchAgent
 
-Core 通过后，只有存在“需要受控外部研究且 KnowledgeAgent 不应拥有这些工具”的证据，才增加 ResearchAgent。它使用 endpoint/domain allowlist、egress/SSRF 控制、引用合同、时间/费用预算和不可信内容隔离；结果先校验再给 ReportAgent。
+Core 通过后，只有存在“需要受控外部研究且 KnowledgeAgent 不应拥有这些工具”的证据，才增加 ResearchAgent。它使用 endpoint/domain allowlist、egress/SSRF 控制、引用合同、时间/费用预算和不可信内容隔离；结果先转换成显式 `ReportTask.source_material` 并校验完整 `ReportTask`，再交给 ReportAgent。
 
 ResearchAgent 不能浏览任意内网、下载并执行代码、安装包、读取本机 secrets 或自动发布结果。外部来源内容不能改变 tool policy、route 或权限。
 
@@ -127,8 +139,8 @@ MCP 接工具/资源/上下文，A2A 处理远程 Agent 任务协作；A2A 不�
 | 里程碑 | 范围 | 独立证据命令 |
 | --- | --- | --- |
 | D1 baseline/contracts | 单 Agent baseline + 五个 schema | `uv run pytest tests/dodo/test_contracts.py tests/dodo/test_baseline.py -q` |
-| D2 Router + direct dispatch | `knowledge`/`report`/`clarify` 三路；直接调用 KnowledgeAgent 或 ReportAgent | `uv run pytest tests/dodo/test_router.py tests/dodo/test_dispatch.py tests/dodo/test_knowledge_agent.py -q` |
-| D3 ReportAgent/composition | typed knowledge -> report、引用保留 | `uv run pytest tests/dodo/test_report_agent.py tests/dodo/test_composition.py -q` |
+| D2 Router + direct dispatch | `knowledge`/`report`/`clarify` 三路；调用 KnowledgeAgent，或从 direct material 构造 validated `ReportTask` 后调用 ReportAgent | `uv run pytest tests/dodo/test_router.py tests/dodo/test_dispatch.py tests/dodo/test_knowledge_agent.py -q` |
+| D3 ReportTask/ReportAgent/composition | direct material 与 `KnowledgeResult` 都先构造成 validated `ReportTask.source_material`；引用保留 | `uv run pytest tests/dodo/test_report_task.py tests/dodo/test_report_agent.py tests/dodo/test_composition.py -q` |
 | D4 eval/failure demo | 分层指标、budget/cancel/trace | `uv run python -m dodo.eval --dataset evals/dodo-core.jsonl --compare single-agent` |
 | D5 Optional Advanced | 四个独立 gate：ResearchAgent、handoff、Registry、A2A adoption | 使用下方四条独立命令；全部不进入 Core gate |
 
@@ -157,9 +169,9 @@ A2A adoption command 必须检查真实远程需求、A2A 1.0 版本、身份/�
 ## 教师演示
 
 1. 用同一数据集先运行 bounded single Agent baseline。
-2. 展示 Router 的三条 strict decision：knowledge 直接进入 KnowledgeAgent，带 validated source material 的 report 直接进入 ReportAgent，信息不足时 clarify；平台拒绝 unknown target。
+2. 展示 Router 的三条 strict decision：knowledge 直接进入 KnowledgeAgent；report 路径校验 direct material、构造 validated `ReportTask` 后进入 ReportAgent；信息不足时 clarify。平台拒绝 unknown target。
 3. 运行 KnowledgeAgent，检查权限、citation 与 child trace。
-4. 把校验后的 `KnowledgeResult` 交给 ReportAgent，证明 citation IDs 保留且没有额外工具。
+4. 把校验后的 `KnowledgeResult` 转换为显式 `ReportTask.source_material`，校验完整 `ReportTask` 后才交给 ReportAgent；证明 citation IDs、origin 和 trace reference 保留且没有额外工具。
 5. 注入 child timeout、schema extra field 和父取消，展示总预算与所有权。
 6. 比较 baseline 后再决定是否保留拆分；最后说明 A2A Stable 但 Optional。
 
@@ -167,7 +179,7 @@ A2A adoption command 必须检查真实远程需求、A2A 1.0 版本、身份/�
 
 1. 建立 D1 单 Agent baseline 与 strict contracts。
 2. 完成 D2：同一个 Router 对 `knowledge`、`report`、`clarify` 都有 fixture；证明 direct report 不调用 KnowledgeAgent，direct knowledge 不调用 ReportAgent。
-3. 完成 D3：ReportAgent 只消费 validated `KnowledgeResult`，形成可审核报告。
+3. 完成 D3：direct report 从 validated direct material 构造 `ReportTask`；knowledge path 从 `KnowledgeResult` 转换出 `ReportTask.source_material`；ReportAgent 两种情况都只消费 validated `ReportTask` 并形成可审核报告。
 4. 完成 D4：specialist、route、composition 与 baseline 四层报告。
 5. 注入错误路由、越权、schema drift、citation 丢失、timeout、cancel 和预算耗尽。
 6. 写 go/no-go：保留多 Agent、缩小拆分或回退单 Agent。
@@ -181,6 +193,9 @@ A2A adoption command 必须检查真实远程需求、A2A 1.0 版本、身份/�
 | Router 低置信度 | `clarify` | route policy |
 | Router 选择 `report` 但缺 source material | validation fail 或 `clarify`，不调用任一 specialist | route/`ReportTask` contract |
 | direct `report` 意外先调用 KnowledgeAgent | Core dispatch test 失败 | dispatch plan/child trace |
+| raw direct material 直接传给 ReportAgent | 输入类型/schema 拒绝，不生成报告 | ReportAgent boundary |
+| `KnowledgeResult` 直接传给 ReportAgent | 输入类型/schema 拒绝，必须先转换为 `ReportTask.source_material` | composition adapter |
+| `ReportTask.source_material` 缺 origin/citation IDs | task validation 失败 | `ReportTask` schema |
 | child 请求额外权限 | 权限不扩大，动作拒绝 | inherited RunContext |
 | KnowledgeAgent 跨 tenant citation | case 失败且无内容泄露 | retrieval filter |
 | ReportAgent 发明 citation | output validation/eval 失败 | report contract |
@@ -211,7 +226,8 @@ uv run pytest \
   tests/dodo/test_contracts.py tests/dodo/test_baseline.py \
   tests/dodo/test_router.py tests/dodo/test_dispatch.py \
   tests/dodo/test_knowledge_agent.py \
-  tests/dodo/test_report_agent.py tests/dodo/test_composition.py -q
+  tests/dodo/test_report_task.py tests/dodo/test_report_agent.py \
+  tests/dodo/test_composition.py -q
 uv run python -m dodo.eval \
   --dataset evals/dodo-core.jsonl --compare single-agent
 ```
@@ -223,8 +239,8 @@ uv run python -m dodo.eval \
 | 项目 | 权重 | 评分证据 |
 | --- | ---: | --- |
 | baseline 与 contracts | 20 | 同数据预算、strict schemas、版本 |
-| Router + direct dispatch | 20 | `knowledge`/`report`/`clarify` 三路；KnowledgeAgent 与 ReportAgent 都可被直接分派；缺材料 fail closed |
-| Specialists + composition | 20 | 权限/citation、结构化 knowledge-to-report、引用保留、无越权工具 |
+| Router + direct dispatch | 20 | `knowledge`/`report`/`clarify` 三路；direct report 从 validated direct material 构造 `ReportTask`；缺材料 fail closed |
+| Specialists + composition | 20 | 权限/citation；`KnowledgeResult -> ReportTask.source_material` 转换；ReportAgent 只接受 validated `ReportTask`；引用保留、无越权工具 |
 | 分层 eval 与比较 | 25 | specialist/route/e2e/baseline delta |
 | 失败、预算与 trace | 15 | timeout/cancel/schema/owner 证据 |
 
@@ -234,7 +250,7 @@ Advanced 加分独立记录，不可补偿 Core 权限或合同失败。多个 A
 
 | 等级 | 完成标准 |
 | --- | --- |
-| Core | 恰好一个 Router、KnowledgeAgent、ReportAgent；Router 必须直接支持 `knowledge`/`report` 并以 `clarify` 处理信息不足；direct dispatch 与 typed knowledge-to-report composition 都有测试；另有可信 context、总预算、分层 eval、single-Agent baseline、失败/取消/trace 证据。 |
+| Core | 恰好一个 Router、KnowledgeAgent、ReportAgent；Router 必须支持 `knowledge`/`report` 并以 `clarify` 处理信息不足；direct material 和 `KnowledgeResult` 分别构造成包含显式 `source_material` 的 validated `ReportTask`，ReportAgent 不接受其他输入；direct dispatch 与 typed composition 都有测试；另有可信 context、总预算、分层 eval、single-Agent baseline、失败/取消/trace 证据。 |
 | Advanced | Core 通过后按证据加入 ResearchAgent，再评估 handoff 与 Registry；A2A 1.0 可做 Stable-but-Optional 远程实验，且有 fallback。 |
 | Production | 每个 Agent 有 owner/version/SLO/eval；身份、tenant、quota、审计、兼容、取消和降级跨边界成立；高风险动作仍由 Workflow + 人工审批。永久排除自动 Agent 生成、任意代码、万能 runtime 和自动高风险动作。 |
 
