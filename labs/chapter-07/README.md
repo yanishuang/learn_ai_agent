@@ -11,7 +11,7 @@ cd reference-implementation
 uv run --group dev --extra live pytest tests/test_rag.py -q
 ```
 
-预期形状：`6 passed`；覆盖真实 quote、tenant/ACL/permission、拒答和 grounded citation。
+预期形状：`8 passed`；覆盖真实 quote、tenant/ACL/permission、拒答和 grounded citation。
 
 ```bash
 cd reference-implementation
