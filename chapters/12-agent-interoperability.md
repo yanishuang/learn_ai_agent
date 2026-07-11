@@ -27,7 +27,7 @@
 3. 先把 specialist 包装为受控工具，再设计明确所有权转移的 handoff。
 4. 为 Registry、路由、handoff 深度、取消、超时和 trace 定义平台边界。
 5. 解释 MCP 与 A2A 互补：前者接工具/上下文，后者做 Agent 间远程协作。
-6. 准确陈述 A2A 1.0 Stable 但 Optional、Google ADK 的 A2A 集成 Experimental，并把 Microsoft Agent Framework 的 Python 1.0 稳定包、beta 集成包和 Go public preview 分开标记。
+6. 准确陈述 A2A 1.0 Stable 但 Optional、Google ADK 的 A2A 集成支持 Python/Go/Java 但未验证独立 maturity designation，并把 Microsoft Agent Framework 的 Python 1.0 稳定包、beta 集成包和 Go public preview 分开标记。
 7. 在不要求框架专用 API 的情况下完成 specialist 和端到端评估。
 
 ## 核心知识
@@ -203,7 +203,7 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 
 ### 12.9 框架与功能成熟度要分别标记
 
-以下标签以矩阵和官方主来源在 2026-07-11 的记录为准。Microsoft Agent Framework 没有一个可以覆盖所有包和语言实现的统一成熟度标签：
+以下标签以矩阵和官方主来源在 2026-07-11 的记录为准。Microsoft Agent Framework 没有一个可以覆盖所有包和语言实现的统一成熟度标签；Google ADK 的 A2A 文档确认支持和语言 quickstart，但本记录没有为该 integration 推导单独的 upstream maturity 标签：
 
 | 技术 | 当前标签 | 本章用法 |
 | --- | --- | --- |
@@ -211,14 +211,14 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 | Pydantic AI 1.x | Stable | 可选类型化 Agent 比较 |
 | LangGraph 1.x | Stable | 可选状态图/Workflow 比较 |
 | Google ADK Python 1.0 | Stable | 可选框架评估 |
-| Google ADK 的 A2A integration | Experimental | 官方 ADK A2A 页面明确标记 Experimental；隔离 adapter，不作为必修 |
+| Google ADK 的 A2A integration | 支持 Python、Go、Java；未验证独立 maturity designation | 有 exposing/consuming quickstart；仅作可选课程扩展，不作为必修或 Core 合同 |
 | Microsoft Agent Framework Python `agent-framework`、`agent-framework-core`、`agent-framework-openai`、`agent-framework-foundry` 1.0 | Stable（PyPI classifier: Production/Stable） | 可选按包评估；不成为课程合同或作业依赖 |
 | Microsoft Agent Framework Python `agent-framework-a2a`、`agent-framework-mem0`、`agent-framework-copilotstudio` `1.0.0b*` | Preview（upstream classifier: Beta） | 仅隔离实验；固定包名/版本并准备 breaking changes |
 | Microsoft Agent Framework for Go | Preview（public preview） | 可选比较；当前能力不与 Python 包假定等价 |
 | Claude Agent SDK 0.2.x | Preview | 可选 sandboxed 实验 |
 | A2A Protocol 1.0 | Stable | 仍是 Optional remote interoperability extension |
 
-“协议 Stable”不能把某个 adapter 的 Experimental/Beta 状态抹掉；某些 Python 包 Production/Stable 也不能推导其他 integration 或 Go 实现同样 Stable。选型记录必须写精确包名、版本、语言、upstream classifier、验证日期和 source，不得给产品家族添加 umbrella maturity。课程合同保持 provider/framework-neutral，框架专用 decorators、handoff API、Agent 类或 A2A SDK 都不能成为 Core 作业要求。
+“协议 Stable”不能自动赋予某个 framework integration 相同标签；“官方支持”也不等于独立 maturity designation。某些 Python 包 Production/Stable 同样不能推导其他 integration 或 Go 实现同样 Stable。选型记录必须写精确包名、版本、语言、已验证的 upstream classifier（若有）、验证日期和 source，不得给产品家族添加 umbrella maturity。课程合同保持 provider/framework-neutral，框架专用 decorators、handoff API、Agent 类或 A2A SDK 都不能成为 Core 作业要求。
 
 ### 12.10 评估：specialist 与端到端都要测
 
@@ -232,7 +232,7 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 2. 把知识检索 specialist 设计成工具，展示 orchestrator 仍拥有最终答案和预算。
 3. 对比 handoff：展示所有权、session、预算和 trace 如何转移而权限不扩大。
 4. 画出 remote Agent 内部再调用 MCP tool 的两层链路，指出各自的授权与 timeout。
-5. 对照矩阵和官方来源，分别标记 A2A 1.0 Stable、ADK A2A Experimental、四个 Microsoft Python 1.0 Production/Stable 包、beta integrations 和 Go public preview；演示为什么不能给整个 Agent Framework 一个标签。
+5. 对照矩阵和官方来源，分别标记 A2A 1.0 Stable、ADK A2A 已支持 Python/Go/Java 但未记录独立 maturity designation、四个 Microsoft Python 1.0 Production/Stable 包、beta integrations 和 Go public preview；演示为什么不能给 framework family 或 integration 推导标签。
 
 ## 学员实验
 
@@ -309,7 +309,7 @@ uv run --group dev --extra live pytest -q
 - [OpenAI Agents SDK - Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
 - [A2A Protocol 1.0 announcement](https://a2a-protocol.org/latest/announcing-1.0/)
 - [A2A latest released specification](https://a2a-protocol.org/dev/specification/)
-- [Google ADK A2A - Experimental](https://adk.dev/a2a/)
+- [Google ADK A2A support and Python/Go/Java quickstarts](https://adk.dev/a2a/)
 - [Google ADK Python 1.0 announcement](https://developers.googleblog.com/en/agents-adk-agent-engine-a2a-enhancements-google-io/)
 - [Microsoft Agent Framework Python package guide: released packages versus preview connectors](https://github.com/microsoft/agent-framework/blob/main/python/README.md)
 - [Microsoft Python 1.0 Production/Stable package metadata: meta](https://pypi.org/project/agent-framework/1.0.0/)
