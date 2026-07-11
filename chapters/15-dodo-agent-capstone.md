@@ -36,15 +36,18 @@ Dodo-Agent 是可选进阶项目，不属于必修 12 周路线。它只回答�
 ### 15.1 Core 架构与固定职责
 
 ```text
-User task -> Router -> KnowledgeAgent -> KnowledgeResult
-                    -> ReportAgent    -> ReportResult
+                         /-- knowledge --> KnowledgeAgent --> KnowledgeResult
+User task --> Router ---+--- report -----> ReportAgent ----> ReportResult
+                         \-- clarify ----> User
+
+KnowledgeResult -- fixed composition --> ReportAgent --> ReportResult
 
 Platform owns: RunContext, total budget, dispatch, schemas, trace, cancellation
 Workflow owns: approvals, waiting, retries, durable side effects
 MCP/tools own: bounded external capabilities, not task ownership
 ```
 
-Router 只输出 `knowledge`、`report` 或 `clarify`。如果一个请求先取知识再写报告，平台执行固定两步 composition：KnowledgeAgent 先返回严格 `KnowledgeResult`，ReportAgent 只接收允许字段。Router 不生成新 Agent、不写 Python、不选择任意 endpoint 或工具。
+Router 只输出 `knowledge`、`report` 或 `clarify`，Core 必须分别测试三条路径。`report` 是直接路由：请求已经带有平台校验过的 source material 时，平台把严格 `ReportTask` 交给 ReportAgent，不先调用 KnowledgeAgent；缺少 source material 时必须 validation fail 或 `clarify`，不能让 ReportAgent 自行检索。如果请求需要先取知识再写报告，平台执行固定两步 composition：KnowledgeAgent 先返回严格 `KnowledgeResult`，再将其转换为 ReportAgent 允许的 source material。Router 不生成新 Agent、不写 Python、不选择任意 endpoint 或工具。
 
 KnowledgeAgent 只做 permission-aware retrieval 与受控只读工具，返回 answer、citations、refused、child trace 和 stop reason。ReportAgent 不重新检索、不执行副作用，只把结构化来源组织为 report sections，并保留 citation IDs。高风险动作交给显式 Workflow + 权威审批，本项目不允许 Agent 自动批准或执行。
 
@@ -57,7 +60,7 @@ KnowledgeAgent 只做 permission-aware retrieval 与受控只读工具，返回 
 | `RouteDecision` | route、reason、confidence label | route 仅 knowledge/report/clarify；confidence 不是授权 |
 | `KnowledgeTask` | objective、allowed_source_ids | 不含 tenant/user/permissions |
 | `KnowledgeResult` | status、answer、citations、trace_id | citation 可回溯；refused 合法 |
-| `ReportTask` | objective、knowledge_result、format | 只接收校验后的结构化材料 |
+| `ReportTask` | objective、source_material、format | direct report 接收调用方提供且平台校验过的材料；composition 接收由 `KnowledgeResult` 转换的材料 |
 | `ReportResult` | status、sections、citation_ids、trace_id | 不得发明来源或动作 |
 
 身份从父 `RunContext` 传递；specialist 不能请求扩权。父 `RunLimits` 分配给 route 与 child，不能每个 Agent 重置完整 budget。平台校验 child stop reason、schema、citation 与权限证据后才进入下一步。
@@ -66,7 +69,7 @@ KnowledgeAgent 只做 permission-aware retrieval 与受控只读工具，返回 
 
 优先使用确定性规则处理明确意图，再用受限分类模型处理剩余 case；低置信度或多义输入返回 `clarify`。模型的 route 只是建议，平台检查 target allowlist、版本、权限、enabled 状态与剩余预算后 dispatch。
 
-Core target 固定写在配置中，不需要 Registry。任何 unknown target、额外字段、disabled Agent、schema mismatch 或预算不足都结构化失败。路由评估至少报告 per-class precision/recall、clarify rate、错误路由成本和 latency，不能只给总体准确率。
+Core target 固定写在配置中，不需要 Registry。测试集必须包含可直接分派给 KnowledgeAgent 的知识请求、可直接分派给 ReportAgent 且带 validated source material 的报告请求，以及需要 `clarify` 的不完整/多义请求。任何 unknown target、`report` 缺少 source material、额外字段、disabled Agent、schema mismatch 或预算不足都结构化失败。路由评估至少报告 `knowledge`/`report`/`clarify` 的 per-class precision/recall、clarify rate、错误路由成本和 latency，不能只给总体准确率。
 
 ### 15.4 最小协作：先 agents-as-tools/固定 composition
 
@@ -78,7 +81,7 @@ Core 保留 orchestrator 所有权。KnowledgeAgent 和 ReportAgent 可作为 ty
 
 必须保留 Know-Engine bounded single Agent baseline，使用同一数据集和预算比较：
 
-- Router：route、clarify、unknown/disabled target、latency；
+- Router：`knowledge`/`report`/`clarify` 三类 route、direct dispatch、unknown/disabled target、latency；
 - KnowledgeAgent：retrieval/citation、refusal、权限、tool/argument、budget；
 - ReportAgent：结构完整、citation preservation、无 unsupported claim；
 - composition：任务成功、总 turns/tools/tokens/time、取消、失败传播、parent/child trace；
@@ -124,17 +127,37 @@ MCP 接工具/资源/上下文，A2A 处理远程 Agent 任务协作；A2A 不�
 | 里程碑 | 范围 | 独立证据命令 |
 | --- | --- | --- |
 | D1 baseline/contracts | 单 Agent baseline + 五个 schema | `uv run pytest tests/dodo/test_contracts.py tests/dodo/test_baseline.py -q` |
-| D2 Router + KnowledgeAgent | knowledge/clarify、权限 citation | `uv run pytest tests/dodo/test_router.py tests/dodo/test_knowledge_agent.py -q` |
+| D2 Router + direct dispatch | `knowledge`/`report`/`clarify` 三路；直接调用 KnowledgeAgent 或 ReportAgent | `uv run pytest tests/dodo/test_router.py tests/dodo/test_dispatch.py tests/dodo/test_knowledge_agent.py -q` |
 | D3 ReportAgent/composition | typed knowledge -> report、引用保留 | `uv run pytest tests/dodo/test_report_agent.py tests/dodo/test_composition.py -q` |
 | D4 eval/failure demo | 分层指标、budget/cancel/trace | `uv run python -m dodo.eval --dataset evals/dodo-core.jsonl --compare single-agent` |
-| D5 Optional Advanced | Research/handoff/Registry/A2A adoption gate | 分别使用显式 `tests/dodo/advanced/` 命令，不进入 Core gate |
+| D5 Optional Advanced | 四个独立 gate：ResearchAgent、handoff、Registry、A2A adoption | 使用下方四条独立命令；全部不进入 Core gate |
 
 这些 `dodo.*` 命令和目录是学员项目必须实现的接口，当前 reference 不提供。每个 milestone 的 `evidence/dN/` 保存命令、machine-readable 输出、成功与失败 case、版本和限制。
+
+**D5 的四个 gate 全部是 Advanced-only，彼此独立，也不能补偿 Core 失败。** 以下命令是学员项目约定的精确可执行证据接口；当前 reference 尚未创建这些模块、测试、fixture 或目录，只有学员实现对应 Advanced 能力后才能运行并声称通过：
+
+```bash
+# Advanced-only: ResearchAgent allowlist、引用、egress 与 budget
+uv run pytest tests/dodo/advanced/test_research_agent.py -q
+
+# Advanced-only: handoff owner、深度/循环、权限与取消传播
+uv run pytest tests/dodo/advanced/test_handoff.py -q
+
+# Advanced-only: Registry schema hash、版本切换、禁用与 endpoint allowlist
+uv run pytest tests/dodo/advanced/test_registry.py -q
+
+# Advanced-only: 生成 A2A adoption evidence；不要求真实远程调用
+uv run python -m dodo.a2a_adoption \
+  --config tests/fixtures/a2a-adoption.json \
+  --output evidence/d5/a2a-adoption-report.json
+```
+
+A2A adoption command 必须检查真实远程需求、A2A 1.0 版本、身份/业务授权、Agent Card 不可信处理、schema、timeout/cancel/idempotency、审计、fallback 和 go/no-go；输出 machine-readable report。需要网络的互操作 smoke test 可以另设凭据 gate，但不是这条 adoption evidence command 的前提。
 
 ## 教师演示
 
 1. 用同一数据集先运行 bounded single Agent baseline。
-2. 展示 Router 的 strict decision，平台拒绝 unknown target，并在低置信度时 clarify。
+2. 展示 Router 的三条 strict decision：knowledge 直接进入 KnowledgeAgent，带 validated source material 的 report 直接进入 ReportAgent，信息不足时 clarify；平台拒绝 unknown target。
 3. 运行 KnowledgeAgent，检查权限、citation 与 child trace。
 4. 把校验后的 `KnowledgeResult` 交给 ReportAgent，证明 citation IDs 保留且没有额外工具。
 5. 注入 child timeout、schema extra field 和父取消，展示总预算与所有权。
@@ -143,7 +166,7 @@ MCP 接工具/资源/上下文，A2A 处理远程 Agent 任务协作；A2A 不�
 ## 学员实验
 
 1. 建立 D1 单 Agent baseline 与 strict contracts。
-2. 完成 D2：一个 Router 只分到 KnowledgeAgent 或 clarify。
+2. 完成 D2：同一个 Router 对 `knowledge`、`report`、`clarify` 都有 fixture；证明 direct report 不调用 KnowledgeAgent，direct knowledge 不调用 ReportAgent。
 3. 完成 D3：ReportAgent 只消费 validated `KnowledgeResult`，形成可审核报告。
 4. 完成 D4：specialist、route、composition 与 baseline 四层报告。
 5. 注入错误路由、越权、schema drift、citation 丢失、timeout、cancel 和预算耗尽。
@@ -156,6 +179,8 @@ MCP 接工具/资源/上下文，A2A 处理远程 Agent 任务协作；A2A 不�
 | --- | --- | --- |
 | Router unknown target | 平台拒绝，不 dispatch | route schema/allowlist |
 | Router 低置信度 | `clarify` | route policy |
+| Router 选择 `report` 但缺 source material | validation fail 或 `clarify`，不调用任一 specialist | route/`ReportTask` contract |
+| direct `report` 意外先调用 KnowledgeAgent | Core dispatch test 失败 | dispatch plan/child trace |
 | child 请求额外权限 | 权限不扩大，动作拒绝 | inherited RunContext |
 | KnowledgeAgent 跨 tenant citation | case 失败且无内容泄露 | retrieval filter |
 | ReportAgent 发明 citation | output validation/eval 失败 | report contract |
@@ -184,21 +209,22 @@ Dodo Core gate 必须由项目补充并保持离线：
 ```bash
 uv run pytest \
   tests/dodo/test_contracts.py tests/dodo/test_baseline.py \
-  tests/dodo/test_router.py tests/dodo/test_knowledge_agent.py \
+  tests/dodo/test_router.py tests/dodo/test_dispatch.py \
+  tests/dodo/test_knowledge_agent.py \
   tests/dodo/test_report_agent.py tests/dodo/test_composition.py -q
 uv run python -m dodo.eval \
   --dataset evals/dodo-core.jsonl --compare single-agent
 ```
 
-Advanced remote/A2A tests 使用独立 marker 和凭据 gate，失败不能阻塞 Core。当前 reference suite 不证明任何 multi-Agent、Registry 或 A2A 行为。
+上文 D5 的四条 Advanced-only 命令分别验证 ResearchAgent、handoff、Registry 和 A2A adoption；它们由学员创建后独立运行，不进入这条 Core gate。需要远程网络的 A2A smoke tests 使用单独 marker 和凭据 gate。当前 reference suite 不证明任何 multi-Agent、Registry 或 A2A 行为。
 
 ## 作业与评分
 
 | 项目 | 权重 | 评分证据 |
 | --- | ---: | --- |
 | baseline 与 contracts | 20 | 同数据预算、strict schemas、版本 |
-| Router + KnowledgeAgent | 20 | route/clarify、权限、citation |
-| ReportAgent + composition | 20 | 结构化传递、引用保留、无越权工具 |
+| Router + direct dispatch | 20 | `knowledge`/`report`/`clarify` 三路；KnowledgeAgent 与 ReportAgent 都可被直接分派；缺材料 fail closed |
+| Specialists + composition | 20 | 权限/citation、结构化 knowledge-to-report、引用保留、无越权工具 |
 | 分层 eval 与比较 | 25 | specialist/route/e2e/baseline delta |
 | 失败、预算与 trace | 15 | timeout/cancel/schema/owner 证据 |
 
@@ -208,7 +234,7 @@ Advanced 加分独立记录，不可补偿 Core 权限或合同失败。多个 A
 
 | 等级 | 完成标准 |
 | --- | --- |
-| Core | 恰好一个 Router、KnowledgeAgent、ReportAgent；typed composition、可信 context、总预算、分层 eval、single-Agent baseline、失败/取消/trace 证据。 |
+| Core | 恰好一个 Router、KnowledgeAgent、ReportAgent；Router 必须直接支持 `knowledge`/`report` 并以 `clarify` 处理信息不足；direct dispatch 与 typed knowledge-to-report composition 都有测试；另有可信 context、总预算、分层 eval、single-Agent baseline、失败/取消/trace 证据。 |
 | Advanced | Core 通过后按证据加入 ResearchAgent，再评估 handoff 与 Registry；A2A 1.0 可做 Stable-but-Optional 远程实验，且有 fallback。 |
 | Production | 每个 Agent 有 owner/version/SLO/eval；身份、tenant、quota、审计、兼容、取消和降级跨边界成立；高风险动作仍由 Workflow + 人工审批。永久排除自动 Agent 生成、任意代码、万能 runtime 和自动高风险动作。 |
 
