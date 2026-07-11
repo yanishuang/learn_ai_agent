@@ -1,9 +1,9 @@
 # 第 2 章：大模型应用基础
 
-更新时间：2026-07-09
+更新时间：2026-07-10
 建议学习时间：3-5 天  
 适合阶段：已经理解 AI Agent 全景，准备开始动手调用大模型  
-本章产出：一个 FastAPI 大模型问答 API、一个结构化输出接口、一个 SSE 流式响应接口、一份调用日志与错误处理清单
+本章 Core 产出：一个确定性 Fake Model 调用证据、一份 provider-neutral 合同检查、一组原生结构化输出与 Live 门禁测试，以及一份 API / SSE 设计评审记录
 
 ## 2.1 本章学习目标
 
@@ -12,10 +12,10 @@
 1. 解释大模型应用的一次完整调用链路。
 2. 区分 system、user、assistant、tool 消息的职责。
 3. 理解 temperature、top_p、max tokens、上下文窗口、流式输出的作用。
-4. 使用 Python + OpenAI SDK / Responses API 完成一次基础模型调用。
-5. 使用 Pydantic 校验模型结构化输出。
-6. 使用 FastAPI + SSE 把模型输出实时推送给前端。
-7. 为模型调用增加基础错误处理、超时、日志和成本意识。
+4. 使用 provider-neutral `ModelGateway` 和 Fake Model 完成确定性基础调用。
+5. 解释并测试 Responses 原生结构化输出与 Pydantic 校验边界。
+6. 评审 FastAPI + SSE 的 JSON framing、断连和取消设计；实现接口属于 Advanced。
+7. 为模型调用设计基础错误处理、超时、日志和成本字段。
 8. 知道哪些参数和输出不能盲目信任。
 
 本章不是 Agent，也不是 RAG。它只解决一个基础问题：如何把大模型稳定接入到后端应用里。
@@ -36,6 +36,10 @@
 ```
 
 不要一开始就做工具调用或 RAG。先把最基础的模型调用做稳定，后面章节才有地基。
+
+## 核心知识
+
+本章核心知识由 2.3-2.12 节组成。Core 关注可离线验证的模型合同、结构化输出和 Live 门禁；普通问答 API 与 SSE 代码用于教师演示和设计评审，不作为当前 Lab 02 已实现的接口承诺。
 
 ## 2.3 大模型应用的一次完整调用链路
 
@@ -130,29 +134,84 @@ uv add fastapi uvicorn openai pydantic pydantic-settings python-dotenv
 `.env.example`：
 
 ```text
-OPENAI_API_KEY=your_api_key
-OPENAI_MODEL=gpt-4.1-mini
+# 只有显式设置为 1 才允许构造 Live adapter。
+AGENT_COURSE_LIVE_TESTS=
+OPENAI_API_KEY=
+OPENAI_MODEL=
 REQUEST_TIMEOUT_SECONDS=60
 ```
 
 `app/settings.py`：
 
 ```python
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
+from dataclasses import dataclass
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+class LiveConfigurationError(RuntimeError):
+    pass
 
+
+@dataclass(frozen=True)
+class LiveSettings:
     openai_api_key: str
-    openai_model: str = "gpt-4.1-mini"
-    request_timeout_seconds: int = 60
+    openai_model: str
+    request_timeout_seconds: int
 
 
-settings = Settings()
+def load_live_settings() -> LiveSettings:
+    missing: list[str] = []
+    if os.getenv("AGENT_COURSE_LIVE_TESTS") != "1":
+        missing.append("AGENT_COURSE_LIVE_TESTS=1")
+
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    model = os.getenv("OPENAI_MODEL", "")
+    if not api_key.strip():
+        missing.append("OPENAI_API_KEY must be non-empty")
+    if not model.strip():
+        missing.append("OPENAI_MODEL must be non-empty")
+    if missing:
+        raise LiveConfigurationError(
+            "live adapter is disabled; required: " + ", ".join(missing)
+        )
+
+    return LiveSettings(
+        openai_api_key=api_key.strip(),
+        openai_model=model.strip(),
+        request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "60")),
+    )
 ```
 
-## 2.7 实践一：普通问答 API
+不要在默认应用组合的模块导入时调用 `load_live_settings()`。下面的
+`app.ai.client` 是 Live-only adapter，默认 Fake 组合不得导入它。默认练习和自动测试
+使用 `FakeModelGateway`，应当离线、无密钥、无网络且可重复；只有付费的 Live 对比
+实验才加载 Live adapter。Live 模式没有默认模型，`OPENAI_MODEL` 必须由操作者明确
+选择。
+
+## 2.7 教师演示：普通问答 API 设计
+
+### 默认离线启动：先运行参考实现
+
+本章的默认可运行路径不是下面的 Live adapter 示例，而是课程仓库中的离线参考实现。
+它由 `create_app()` 组合 `FakeModelGateway`、本地工具、内存 session 和 trace，不读取
+API Key，也不发起模型网络请求。先进入 `reference-implementation/`，再运行与参考实现
+README 一致的命令：
+
+```bash
+uv sync --group dev --extra live
+uv run --group dev --extra live uvicorn agent_course.api.app:create_app --factory --reload
+```
+
+在另一终端确认离线应用已经启动：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+预期结果是 `{"status":"ok"}`。这个默认 API 故意不伪造认证身份；除 `/health` 外的
+端点需要宿主应用从认证结果注入 `RunContext`，否则会以 `503` 失败。它仍然已经完成
+`FakeModelGateway` 的离线组合；带真实身份的 API 请求在参考实现测试中通过
+`create_app(..., context_provider=...)` 注入。
 
 ### 目标
 
@@ -194,16 +253,20 @@ class ChatResponse(BaseModel):
     answer: str
 ```
 
-### OpenAI Client
+### Live-only 示例：OpenAI Client
+
+本小节及后续的 `app/` 代码展示如何把同一 API 设计接到真实 Responses API。它们不是
+参考实现的默认启动模块，不能在未设置三重 Live 门禁时导入或启动。
 
 `app/ai/client.py`：
 
 ```python
 from openai import AsyncOpenAI
 
-from app.settings import settings
+from app.settings import load_live_settings
 
 
+settings = load_live_settings()
 client = AsyncOpenAI(
     api_key=settings.openai_api_key,
     timeout=settings.request_timeout_seconds,
@@ -215,8 +278,7 @@ client = AsyncOpenAI(
 `app/ai/service.py`：
 
 ```python
-from app.ai.client import client
-from app.settings import settings
+from app.ai.client import client, settings
 
 
 SYSTEM_PROMPT = """
@@ -234,7 +296,6 @@ async def chat(message: str) -> str:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": message},
         ],
-        temperature=0.2,
     )
     return response.output_text
 ```
@@ -269,12 +330,13 @@ app = FastAPI(title="AI Agent Course")
 app.include_router(router)
 ```
 
-### 验收方式
+### 可选 Live 验收方式
 
-启动服务：
+只有完成自己的 `app/` 项目并显式设置 `AGENT_COURSE_LIVE_TESTS=1`、非空
+`OPENAI_API_KEY` 和非空 `OPENAI_MODEL` 后，才可以启动这个 Live-only 示例：
 
 ```bash
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 ```
 
 调用接口：
@@ -285,9 +347,10 @@ curl -X POST http://127.0.0.1:8000/api/ai/chat \
   -d '{"message":"请用三句话解释什么是 RAG"}'
 ```
 
-能得到中文回答，即完成本章第一个目标。
+能得到中文回答，即完成 Live 对比实验。日常学习、自动测试和首次启动仍使用上一节的
+`FakeModelGateway` 离线路径。
 
-## 2.8 实践二：结构化输出
+## 2.8 教师演示：结构化输出
 
 ### 为什么需要结构化输出
 
@@ -322,47 +385,46 @@ class LessonAnswer(BaseModel):
 
 ### Service 示例
 
-先让模型输出 JSON，再用 Pydantic 校验。第 6 章进入 RAG 后，`citations` 应该来自真实检索结果，而不是模型自由编造。
+Live adapter 使用 Responses API 的原生结构化输出，让 SDK 按 Pydantic 类型解析；
+应用仍然要处理拒绝、缺失输出和上游错误。第 7 章进入 RAG 后，`citations`
+必须来自真实检索结果，而不是模型自由编造。
 
 ```python
-import json
-
-from pydantic import ValidationError
-
-from app.ai.client import client
+from app.ai.client import client, settings
 from app.ai.schemas import LessonAnswer
-from app.settings import settings
 
 
-STRUCTURED_PROMPT = """
+SYSTEM_PROMPT = """
 你是 AI Agent 课程助教。
-请回答用户问题，并只返回 JSON。
-
-JSON 字段：
-- answer: 字符串，直接回答
-- confidence: high、medium、low 之一
-- citations: 数组，当前没有检索资料时返回空数组
-- missing_info: 字符串或 null，说明还缺什么信息
-
-不要输出 Markdown，不要输出 JSON 以外的解释。
+请准确回答；没有检索资料时 citations 必须为空数组，不要编造来源。
 """.strip()
 
 
 async def structured_chat(message: str) -> LessonAnswer:
-    response = await client.responses.create(
+    response = await client.responses.parse(
         model=settings.openai_model,
         input=[
-            {"role": "system", "content": STRUCTURED_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": message},
         ],
-        temperature=0.1,
+        text_format=LessonAnswer,
     )
-    try:
-        payload = json.loads(response.output_text)
-        return LessonAnswer.model_validate(payload)
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise ValueError(f"模型结构化输出校验失败: {exc}") from exc
+    if response.output_parsed is None:
+        raise ValueError("Responses API returned no parsed output")
+    return response.output_parsed
 ```
+
+参考实现中的 `OpenAIResponsesGateway.parse_structured()` 使用同一合同：模型来自
+显式的 `OPENAI_MODEL`，调用 `AsyncOpenAI.responses.parse()`，并在
+`output_parsed` 缺失时失败。构造 gateway 仍受 `AGENT_COURSE_LIVE_TESTS=1`、
+非空 Key 和非空模型三重门禁约束。
+
+### 兼容说明：Prompt-only JSON
+
+只有旧模型或兼容服务不支持原生结构化输出时，才在 prompt 中要求“只返回 JSON”，
+再对 `response.output_text` 执行 `json.loads()` 和
+`LessonAnswer.model_validate()`。这是兼容路径，不是本章主线；它必须捕获
+`JSONDecodeError` / `ValidationError`，不得把解析失败的文本传给业务流程。
 
 ### Route 示例
 
@@ -397,9 +459,10 @@ async def structured_endpoint(request: ChatRequest) -> LessonAnswer:
 }
 ```
 
-如果模型输出不是合法 JSON，后端必须报错或重试，不能把脏数据继续传给业务流程。
+如果结构化结果缺失或校验失败，后端必须报错或按受控策略重试，不能把脏数据继续传给
+业务流程。
 
-## 2.9 实践三：SSE 流式响应
+## 2.9 教师演示：SSE 流式响应设计
 
 ### 为什么需要流式输出
 
@@ -415,43 +478,74 @@ async def structured_endpoint(request: ChatRequest) -> LessonAnswer:
 ### Service 示例
 
 ```python
+import asyncio
+import json
 from collections.abc import AsyncIterator
+from collections.abc import Awaitable, Callable
 
-from app.ai.client import client
-from app.settings import settings
+from app.ai.client import client, settings
 
 
-async def stream_chat(message: str) -> AsyncIterator[str]:
-    stream = await client.responses.create(
-        model=settings.openai_model,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": message},
-        ],
-        temperature=0.2,
-        stream=True,
-    )
+def sse_event(event: str, data: object) -> str:
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event}\ndata: {payload}\n\n"
 
-    async for event in stream:
-        if event.type == "response.output_text.delta":
-            yield event.delta
+
+async def stream_chat(
+    message: str,
+    is_disconnected: Callable[[], Awaitable[bool]],
+) -> AsyncIterator[str]:
+    try:
+        async with client.responses.stream(
+            model=settings.openai_model,
+            input=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+        ) as stream:
+            async for event in stream:
+                if await is_disconnected():
+                    return
+                if event.type == "response.output_text.delta":
+                    yield sse_event("delta", {"text": event.delta})
+            yield sse_event("done", {"status": "completed"})
+    except asyncio.CancelledError:
+        # Starlette 取消响应生成器时继续传播取消；async with 会关闭上游流。
+        raise
 ```
 
 ### Route 示例
 
 ```python
+import asyncio
+
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 
 @router.post("/stream")
-async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
+async def stream_endpoint(
+    payload: ChatRequest,
+    request: Request,
+) -> StreamingResponse:
     async def event_source():
-        async for chunk in stream_chat(request.message):
-            yield f"data: {chunk}\\n\\n"
-        yield "event: done\\ndata: [DONE]\\n\\n"
+        try:
+            async for event in stream_chat(payload.message, request.is_disconnected):
+                yield event
+        except asyncio.CancelledError:
+            raise
 
-    return StreamingResponse(event_source(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 ```
+
+SSE 的每个 `data:` 都是合法 JSON，文本中的换行符会被 JSON 转义，不会破坏
+事件边界。`request.is_disconnected()` 处理已可观察到的断连，
+`CancelledError` 处理 ASGI 服务器主动取消；两条路径都会离开 `async with` 并关闭
+上游 Responses 流。不要吞掉取消异常，也不要在客户端离开后继续生成和计费。
 
 ### 前端接收方式
 
@@ -470,7 +564,7 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 | --- | --- |
 | API Key 缺失 | 启动时失败，提示配置环境变量 |
 | 请求超时 | 返回可重试错误，记录超时阶段 |
-| 模型限流 | 指数退避重试，必要时降级模型 |
+| 模型限流 | 仅对可安全重放的请求做有上限、带抖动的退避；记录重试次数 |
 | 输出格式错误 | 结构化接口必须重试或报错 |
 | 内容过长 | 截断输入、摘要历史、提示用户缩小范围 |
 | 上游不可用 | 返回友好错误，不暴露内部堆栈 |
@@ -505,7 +599,7 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 
 - 检索到哪些文档。
 - 调用了哪些工具。
-- 工具参数是什么。
+- 工具参数摘要是什么（敏感字段脱敏，不保存原始参数）。
 - 每轮 Agent 的停止原因。
 - token、费用和耗时。
 
@@ -532,20 +626,26 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 - 引用来源必须来自后端检索结果。
 - 高风险动作不能只靠模型一句话触发。
 
-## 2.13 本章完整实践任务
+## 学员实验
+
+Core 实验使用已存在的 [Lab 02](../labs/chapter-02/README.md)。学习者运行 Fake、provider contract、Live gate 和原生结构化输出测试，并提交确定性输出 shape、失败分类和门禁证据。当前参考实现**不提供** `/api/ai/chat`、`/api/ai/structured` 或 `/api/ai/stream`，因此 Lab 02 不把这些端点列为 Core 验收。
+
+下面四项是 Advanced 实现扩展。选择扩展的学习者必须先写对应 API / SSE 自动测试，再声称接口完成；只阅读示例代码不算交付。
 
 ### 任务 1：基础问答接口
 
 要求：
 
 - 使用 FastAPI。
-- 使用 OpenAI SDK。
+- 默认注入 `FakeModelGateway`，离线且不要求 API Key。
 - `POST /api/ai/chat` 能返回中文回答。
-- API Key 从环境变量读取。
+- 可选 Live adapter 使用 OpenAI SDK，并只从环境变量读取 Key 和显式模型名。
 
 验收：
 
 - 能回答“什么是 AI Agent”。
+- 默认测试不导入可选 Live 包，也不访问网络。
+- 缺少精确 Live 开关、非空 Key 或非空 `OPENAI_MODEL` 时，Live adapter 拒绝构造。
 - 控制台不打印 API Key。
 - 空字符串输入会被 Pydantic 拦截。
 
@@ -554,7 +654,9 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 要求：
 
 - `POST /api/ai/structured` 返回 `answer`、`confidence`、`citations`、`missing_info`。
-- 使用 Pydantic 校验。
+- Live 路径使用 `responses.parse(..., text_format=LessonAnswer)`。
+- 模型参数来自显式 `OPENAI_MODEL`，没有硬编码默认值。
+- Prompt-only JSON 只作为兼容路径，并继续使用 Pydantic 校验。
 - 非法输出不能静默通过。
 
 验收：
@@ -569,12 +671,12 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 
 - `POST /api/ai/stream` 使用 SSE 返回。
 - 前端或 `curl -N` 能看到分片输出。
-- 最后发送 done 事件。
+- 每个事件的 `data:` 是 JSON，最后发送 `done` 事件。
 
 验收：
 
 - 长回答不需要等到全部生成完成。
-- 客户端断开时服务端不会继续无限执行。
+- 客户端断开或任务取消时，上游流被关闭，服务端不会继续无限执行。
 
 ### 任务 4：调用日志
 
@@ -589,6 +691,42 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 - 能根据 `request_id` 找到一次请求的完整日志。
 - 日志里没有 API Key 和敏感输入全文。
 
+## 失败注入与排错
+
+| 注入 | Core 预期 | 排错重点 |
+| --- | --- | --- |
+| 输入不等于精确 Fake fixture | 返回固定 fallback，而不是随机结果 | fixture 文本和消息角色 |
+| `[fixture:timeout]` | 类型化 timeout，默认不联网重试 | gateway 异常分类 |
+| `[fixture:invalid-output]` | `model_error`，不伪装成完成 | runner stop reason |
+| 缺少 Live flag/key/model | 请求前 `LiveConfigurationError` | 三重环境门禁，不打印值 |
+| Responses `incomplete` / content filter | 类型化非成功 stop reason | `status`、`incomplete_details`、`error.code` |
+| SSE 设计遗漏断连 | Advanced 设计评审失败 | JSON framing、取消传播、上游关闭 |
+
+## 自动验证
+
+从仓库根目录运行 Lab 02 的默认离线验收：
+
+```bash
+cd reference-implementation
+uv run --frozen --no-sync --group dev --extra live pytest \
+  tests/test_core.py tests/test_fake_model.py tests/test_live_gates.py -q \
+  -k 'not successful_live_gate_construction'
+```
+
+该命令验证 provider-neutral 合同、精确 Fake 行为、Live 门禁、Responses 原生 Pydantic parse、strict schema、每轮剩余输出 token 和终态分类。它不声称验证尚未实现的 FastAPI/SSE 端点。
+
+## 作业与评分
+
+| 评分项 | 分值 | 满分证据 |
+| --- | ---: | --- |
+| Fake 与消息合同 | 25 | 精确 fixture、固定输出 shape、无网络证据 |
+| 结构化输出与 Live 门禁 | 25 | parse/gate focused tests 与失败解释 |
+| 状态、预算与错误分类 | 20 | remaining token、incomplete/filter/model failure 证据 |
+| API / SSE 设计评审 | 20 | DTO、JSON event、断连/取消、日志字段；不冒充已实现 |
+| 复盘与安全边界 | 10 | 密钥、敏感输入、输出不可信和成本边界 |
+
+总分 100 分。Core 及格线为 70 分，且 Live 门禁、结构化校验和“未实现端点不冒充完成”三项为硬门槛。
+
 ## 2.14 本章自测题
 
 ### 概念题
@@ -601,7 +739,7 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 ### 判断题
 
 1. API Key 可以临时写在代码里，只要不截图就行。  
-2. 结构化输出只要 prompt 写“返回 JSON”就一定可靠。  
+2. 原生结构化输出成功后，就不需要检查 `output_parsed`。
 3. 模型调用日志应该记录 request_id、模型、耗时和失败原因。  
 4. 流式输出可以改善长回答的用户体验。  
 
@@ -612,16 +750,13 @@ async def stream_endpoint(request: ChatRequest) -> StreamingResponse:
 3. 对。  
 4. 对。  
 
-## 2.15 本章完成标准
+## Core / Advanced / Production 完成标准
 
-完成本章后，你应该能做到：
-
-- 能启动一个 FastAPI AI 服务。
-- 能完成普通问答调用。
-- 能用 Pydantic 校验结构化输出。
-- 能实现一个 SSE 流式响应接口。
-- 能说明调用日志应该记录哪些字段。
-- 能说清楚 API Key、输入、输出的安全边界。
+| 等级 | 完成标准 |
+| --- | --- |
+| Core | Lab 02 默认离线命令通过；能解释消息、provider 合同、结构化输出、Live 门禁、类型化 stop reason 和 API/SSE 设计边界；不声称三个示例端点已经存在。 |
+| Advanced | 自行实现普通问答、原生结构化输出和 SSE 端点，并新增 API contract、JSON framing、断连、取消和非法输出测试；Live 仍显式付费启用。 |
+| Production | 在 Advanced 基础上实现认证身份、限流、总 deadline、取消传播、usage/cost、脱敏日志、SLO、告警、保留策略和发布回归门禁。 |
 
 ## 2.16 本章学习资料
 

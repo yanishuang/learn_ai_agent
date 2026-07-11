@@ -1,0 +1,98 @@
+[
+  {
+    "number": 0,
+    "path": "chapters/00-course-setup.md",
+    "title": "课程准备：环境、运行模式与教学项目",
+    "track": "prerequisite"
+  },
+  {
+    "number": 1,
+    "path": "chapters/01-ai-agent-overview.md",
+    "title": "第 1 章：AI Agent 全景与学习路线",
+    "track": "core"
+  },
+  {
+    "number": 2,
+    "path": "chapters/02-llm-application-basics.md",
+    "title": "第 2 章：大模型应用基础",
+    "track": "core"
+  },
+  {
+    "number": 3,
+    "path": "chapters/03-prompt-and-context-engineering.md",
+    "title": "第 3 章：Prompt Engineering 与 Context Engineering",
+    "track": "core"
+  },
+  {
+    "number": 4,
+    "path": "chapters/04-python-ai-application-stack.md",
+    "title": "第 4 章：Python AI 应用工程栈",
+    "track": "core"
+  },
+  {
+    "number": 5,
+    "path": "chapters/05-tool-calling.md",
+    "title": "第 5 章：Tool Calling / Function Calling",
+    "track": "core"
+  },
+  {
+    "number": 6,
+    "path": "chapters/06-agent-runtime.md",
+    "title": "第 6 章：单 Agent Runtime：执行循环、工具、记忆与 Trace",
+    "track": "core"
+  },
+  {
+    "number": 7,
+    "path": "chapters/07-rag-core.md",
+    "title": "第 7 章：RAG 核心：从文档到可信答案",
+    "track": "core"
+  },
+  {
+    "number": 8,
+    "path": "chapters/08-workflow-durable-execution.md",
+    "title": "第 8 章：Workflow 与持久化执行",
+    "track": "core"
+  },
+  {
+    "number": 9,
+    "path": "chapters/09-agent-evaluation-observability-security.md",
+    "title": "第 9 章：Agent 评估、可观测性与安全",
+    "track": "core"
+  },
+  {
+    "number": 10,
+    "path": "chapters/10-mcp-integration.md",
+    "title": "第 10 章：MCP 集成与信任治理",
+    "track": "core"
+  },
+  {
+    "number": 11,
+    "path": "chapters/11-advanced-rag-and-data-routing.md",
+    "title": "第 11 章：高级 RAG 与受治理的数据路由",
+    "track": "advanced"
+  },
+  {
+    "number": 12,
+    "path": "chapters/12-agent-interoperability.md",
+    "title": "第 12 章：多 Agent 设计与互操作",
+    "track": "advanced"
+  },
+  {
+    "number": 13,
+    "path": "chapters/13-product-experience-and-production.md",
+    "title": "第 13 章：产品体验、企业集成与生产治理",
+    "track": "core"
+  },
+  {
+    "number": 14,
+    "path": "chapters/14-know-engine-capstone.md",
+    "title": "第 14 章：Know-Engine 毕业项目",
+    "track": "core"
+  },
+  {
+    "number": 15,
+    "path": "chapters/15-dodo-agent-capstone.md",
+    "title": "第 15 章：Dodo-Agent 进阶项目",
+    "track": "advanced"
+  }
+]
