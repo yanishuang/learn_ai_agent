@@ -27,7 +27,7 @@
 3. 先把 specialist 包装为受控工具，再设计明确所有权转移的 handoff。
 4. 为 Registry、路由、handoff 深度、取消、超时和 trace 定义平台边界。
 5. 解释 MCP 与 A2A 互补：前者接工具/上下文，后者做 Agent 间远程协作。
-6. 准确陈述 A2A 1.0 Stable 但 Optional、Google ADK 的 A2A 集成支持 Python/Go/Java 但未验证独立 maturity designation，并把 Microsoft Agent Framework 的 Python 1.0 稳定包、beta 集成包和 Go public preview 分开标记。
+6. 准确陈述 A2A 1.0 Stable 但 Optional、Google ADK 的 A2A 集成支持 Python/Go/Java 且被上游标为 Experimental，并把 Microsoft Agent Framework 的 Python 1.0 稳定包、beta 集成包和 Go public preview 分开标记。
 7. 在不要求框架专用 API 的情况下完成 specialist 和端到端评估。
 
 ## 核心知识
@@ -203,15 +203,15 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 
 ### 12.9 框架与功能成熟度要分别标记
 
-以下标签以矩阵和官方主来源在 2026-07-11 的记录为准。Microsoft Agent Framework 没有一个可以覆盖所有包和语言实现的统一成熟度标签；Google ADK 的 A2A 文档确认支持和语言 quickstart，但本记录没有为该 integration 推导单独的 upstream maturity 标签：
+以下标签以矩阵和官方主来源在 2026-07-11 的记录为准。Microsoft Agent Framework 没有一个可以覆盖所有包和语言实现的统一成熟度标签；Google ADK 的 A2A 文档确认支持和语言 quickstart，并明确把该 integration 标为 Experimental：
 
 | 技术 | 当前标签 | 本章用法 |
 | --- | --- | --- |
 | OpenAI Agents SDK | Stable（核心 runtime） | 可选比较 handoff/agents-as-tools，不是作业依赖 |
-| Pydantic AI 1.x | Stable | 可选类型化 Agent 比较 |
+| Pydantic AI 2.x | Stable | 可选类型化 Agent 比较；使用已修补的 v2 release，不沿用早期 v2 beta 假设 |
 | LangGraph 1.x | Stable | 可选状态图/Workflow 比较 |
 | Google ADK Python 1.0 | Stable | 可选框架评估 |
-| Google ADK 的 A2A integration | 支持 Python、Go、Java；未验证独立 maturity designation | 有 exposing/consuming quickstart；仅作可选课程扩展，不作为必修或 Core 合同 |
+| Google ADK 的 A2A integration | Experimental（上游标签）；支持 Python、Go、Java | 有 exposing/consuming quickstart；仅作隔离的可选课程扩展，不作为必修或 Core 合同 |
 | Microsoft Agent Framework Python `agent-framework`、`agent-framework-core`、`agent-framework-openai`、`agent-framework-foundry` 1.0 | Stable（PyPI classifier: Production/Stable） | 可选按包评估；不成为课程合同或作业依赖 |
 | Microsoft Agent Framework Python `agent-framework-a2a`、`agent-framework-mem0`、`agent-framework-copilotstudio` `1.0.0b*` | Preview（upstream classifier: Beta） | 仅隔离实验；固定包名/版本并准备 breaking changes |
 | Microsoft Agent Framework for Go | Preview（public preview） | 可选比较；当前能力不与 Python 包假定等价 |
@@ -232,7 +232,7 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 2. 把知识检索 specialist 设计成工具，展示 orchestrator 仍拥有最终答案和预算。
 3. 对比 handoff：展示所有权、session、预算和 trace 如何转移而权限不扩大。
 4. 画出 remote Agent 内部再调用 MCP tool 的两层链路，指出各自的授权与 timeout。
-5. 对照矩阵和官方来源，分别标记 A2A 1.0 Stable、ADK A2A 已支持 Python/Go/Java 但未记录独立 maturity designation、四个 Microsoft Python 1.0 Production/Stable 包、beta integrations 和 Go public preview；演示为什么不能给 framework family 或 integration 推导标签。
+5. 对照矩阵和官方来源，分别标记 A2A 1.0 Stable、ADK A2A 支持 Python/Go/Java 且为 Experimental、四个 Microsoft Python 1.0 Production/Stable 包、beta integrations 和 Go public preview；演示为什么不能给 framework family 推导统一标签。
 
 ## 学员实验
 
