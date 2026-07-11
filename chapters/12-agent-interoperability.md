@@ -27,7 +27,7 @@
 3. 先把 specialist 包装为受控工具，再设计明确所有权转移的 handoff。
 4. 为 Registry、路由、handoff 深度、取消、超时和 trace 定义平台边界。
 5. 解释 MCP 与 A2A 互补：前者接工具/上下文，后者做 Agent 间远程协作。
-6. 准确陈述 A2A 1.0 Stable 但 Optional、Google ADK 的 A2A 集成 Experimental、Microsoft Agent Framework Preview。
+6. 准确陈述 A2A 1.0 Stable 但 Optional、Google ADK 的 A2A 集成 Experimental，并把 Microsoft Agent Framework 的 Python 1.0 稳定包、beta 集成包和 Go public preview 分开标记。
 7. 在不要求框架专用 API 的情况下完成 specialist 和端到端评估。
 
 ## 核心知识
@@ -203,7 +203,7 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 
 ### 12.9 框架与功能成熟度要分别标记
 
-以下标签以矩阵和官方主来源在 2026-07-10 的记录为准：
+以下标签以矩阵和官方主来源在 2026-07-11 的记录为准。Microsoft Agent Framework 没有一个可以覆盖所有包和语言实现的统一成熟度标签：
 
 | 技术 | 当前标签 | 本章用法 |
 | --- | --- | --- |
@@ -212,11 +212,13 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 | LangGraph 1.x | Stable | 可选状态图/Workflow 比较 |
 | Google ADK Python 1.0 | Stable | 可选框架评估 |
 | Google ADK 的 A2A integration | Experimental | 官方 ADK A2A 页面明确标记 Experimental；隔离 adapter，不作为必修 |
-| Microsoft Agent Framework | Preview | 仅探索；隔离 adapter 并准备 breaking changes |
+| Microsoft Agent Framework Python `agent-framework`、`agent-framework-core`、`agent-framework-openai`、`agent-framework-foundry` 1.0 | Stable（PyPI classifier: Production/Stable） | 可选按包评估；不成为课程合同或作业依赖 |
+| Microsoft Agent Framework Python `agent-framework-a2a`、`agent-framework-mem0`、`agent-framework-copilotstudio` `1.0.0b*` | Preview（upstream classifier: Beta） | 仅隔离实验；固定包名/版本并准备 breaking changes |
+| Microsoft Agent Framework for Go | Preview（public preview） | 可选比较；当前能力不与 Python 包假定等价 |
 | Claude Agent SDK 0.2.x | Preview | 可选 sandboxed 实验 |
 | A2A Protocol 1.0 | Stable | 仍是 Optional remote interoperability extension |
 
-“协议 Stable”不能把某个框架 adapter 的 Experimental 状态抹掉；“框架 Stable”也不能推导其所有扩展都 Stable。课程合同保持 provider/framework-neutral，框架专用 decorators、handoff API、Agent 类或 A2A SDK 都不能成为 Core 作业要求。
+“协议 Stable”不能把某个 adapter 的 Experimental/Beta 状态抹掉；某些 Python 包 Production/Stable 也不能推导其他 integration 或 Go 实现同样 Stable。选型记录必须写精确包名、版本、语言、upstream classifier、验证日期和 source，不得给产品家族添加 umbrella maturity。课程合同保持 provider/framework-neutral，框架专用 decorators、handoff API、Agent 类或 A2A SDK 都不能成为 Core 作业要求。
 
 ### 12.10 评估：specialist 与端到端都要测
 
@@ -230,7 +232,7 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 2. 把知识检索 specialist 设计成工具，展示 orchestrator 仍拥有最终答案和预算。
 3. 对比 handoff：展示所有权、session、预算和 trace 如何转移而权限不扩大。
 4. 画出 remote Agent 内部再调用 MCP tool 的两层链路，指出各自的授权与 timeout。
-5. 对照矩阵和官方页面，分别标记 A2A 1.0 Stable、ADK A2A Experimental、Microsoft Agent Framework Preview。
+5. 对照矩阵和官方来源，分别标记 A2A 1.0 Stable、ADK A2A Experimental、四个 Microsoft Python 1.0 Production/Stable 包、beta integrations 和 Go public preview；演示为什么不能给整个 Agent Framework 一个标签。
 
 ## 学员实验
 
@@ -242,7 +244,8 @@ Task 11 将创建 `labs/chapter-12/`；该目录不在本次提交中。本章�
 4. 设计 Registry 记录和原子版本升级流程。
 5. 为两个 specialist 各写 10 条 case，再写 15 条 Router/端到端 case。
 6. 写 MCP/A2A/Apps 分层图和信任边界。
-7. Optional：写 A2A adoption record，必须包含真实远程需求、maturity、fallback、威胁和不采用方案；不要求框架 SDK。
+7. Optional：从 Microsoft Agent Framework 选择一个**精确包或 Go 实现**写 maturity record，记录 artifact、version、classifier、source、验证日期和 fallback；只做资料评估，不要求安装或调用框架 API。
+8. Optional：写 A2A adoption record，必须包含真实远程需求、maturity、fallback、威胁和不采用方案；不要求框架 SDK。
 
 ## 失败注入与排错
 
@@ -308,7 +311,15 @@ uv run --group dev --extra live pytest -q
 - [A2A latest released specification](https://a2a-protocol.org/dev/specification/)
 - [Google ADK A2A - Experimental](https://adk.dev/a2a/)
 - [Google ADK Python 1.0 announcement](https://developers.googleblog.com/en/agents-adk-agent-engine-a2a-enhancements-google-io/)
-- [Microsoft Agent Framework overview](https://learn.microsoft.com/en-us/agent-framework/overview/)
+- [Microsoft Agent Framework Python package guide: released packages versus preview connectors](https://github.com/microsoft/agent-framework/blob/main/python/README.md)
+- [Microsoft Python 1.0 Production/Stable package metadata: meta](https://pypi.org/project/agent-framework/1.0.0/)
+- [Microsoft Python 1.0 Production/Stable package metadata: core](https://pypi.org/project/agent-framework-core/1.0.0/)
+- [Microsoft Python 1.0 Production/Stable package metadata: OpenAI](https://pypi.org/project/agent-framework-openai/1.0.0/)
+- [Microsoft Python 1.0 Production/Stable package metadata: Foundry](https://pypi.org/project/agent-framework-foundry/1.0.0/)
+- [Microsoft Python beta integration metadata: A2A](https://github.com/microsoft/agent-framework/blob/main/python/packages/a2a/pyproject.toml)
+- [Microsoft Python beta integration metadata: Mem0](https://github.com/microsoft/agent-framework/blob/main/python/packages/mem0/pyproject.toml)
+- [Microsoft Python beta integration metadata: Copilot Studio](https://github.com/microsoft/agent-framework/blob/main/python/packages/copilotstudio/pyproject.toml)
+- [Microsoft Agent Framework overview: Go public preview](https://learn.microsoft.com/en-us/agent-framework/overview/)
 - [Model Context Protocol](https://modelcontextprotocol.io/docs/getting-started/intro)
 - [Anthropic - Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 
