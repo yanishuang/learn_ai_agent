@@ -22,7 +22,9 @@ from agent_course.tools.orders import QueryOrderStatusTool
 
 async def main():
     context = RunContext(user_id="learner", tenant_id="tenant-1", request_id="lab-05", permissions=frozenset({"orders:read"}))
-    result = await QueryOrderStatusTool().execute({"order_id": "O1001"}, context)
+    result = await QueryOrderStatusTool().execute(
+        {"order_id": "O1001"}, context=context
+    )
     print(result.model_dump_json())
 
 asyncio.run(main())

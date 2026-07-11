@@ -2,7 +2,7 @@
 
 ## 目标
 
-验证 tenant/user/permission 在评分前过滤、同义/关键词覆盖、稳定排序、引用来自真实 hit，以及无授权答案时拒答。
+验证 tenant/user/permission 在评分前过滤、小型显式 query synonym 词表、稳定词法排序、引用来自真实 hit，以及无授权答案时拒答。该机制不是 embedding 或语义检索。
 
 ## 默认离线步骤
 
@@ -32,7 +32,7 @@ fixtures 故意放入跨租户、高相似但无权限或误导性单词重叠�
 ## 调试顺序
 
 1. 先检查 `_is_visible` 的 tenant/user/permission 输入来自 trusted context。
-2. 再检查 query tokenization、最低分和至少匹配词数。
+2. 再检查 query tokenization、显式 synonym replacement、最低分和至少匹配词数；原词与文档词零重叠的 case 必须由词表解释。
 3. 检查稳定排序键，不依赖随机向量顺序。
 4. 从 hit 构造 quote/citation；禁止模型自由编 source ID。
 5. 无 hit 时走固定拒答，不用常识补全。

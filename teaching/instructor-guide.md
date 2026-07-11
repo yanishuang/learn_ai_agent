@@ -17,7 +17,7 @@
 
 - 准备：第 2 章、[Lab 02](../labs/chapter-02/README.md)、精确 Fake fixtures。
 - 15 分钟 opener：provider-neutral gateway、消息角色、结构化输出与错误分类。
-- 演示：`cd reference-implementation && uv run --group dev --extra live pytest tests/test_fake_model.py tests/test_live_gates.py -q -k 'direct_answer or strict_environment_gate'`。
+- 演示：`cd reference-implementation && uv run --group dev --extra live pytest tests/test_fake_model.py tests/test_live_gates.py -q -k 'plain_answer or strict_environment_gate'`。
 - Lab block：运行直接回答、timeout 和 Live gate 探针。
 - 失败注入：缺少 `AGENT_COURSE_LIVE_TESTS=1` 时构造 Live adapter，预期请求前拒绝。
 - 讨论：为什么 Fake 可证明应用合同，却不能证明真实模型质量？
@@ -94,7 +94,7 @@
 
 - 准备：第 9 章、[Lab 09](../labs/chapter-09/README.md) 和三个 JSONL 数据集。
 - 15 分钟 opener：确定性断言、适用分母、trace grading、red team。
-- 演示：`cd reference-implementation && uv run --group dev --extra live pytest tests/test_evals.py tests/test_agent_runner.py -q -k 'evaluate_cases or trace_sink'`。
+- 演示：`cd reference-implementation && uv run python ../evals/run_baseline.py --dataset all`。
 - Lab block：加载 agent cases、验证 schema/唯一 ID，检查 security case 的禁止副作用。
 - 失败注入：复制一个 case ID，预期唯一性检查失败。
 - 讨论：哪些指标绝不能交给 LLM judge 决定？

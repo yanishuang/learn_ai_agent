@@ -11,7 +11,7 @@ cd reference-implementation
 uv run --group dev --extra live pytest tests/test_fake_model.py -q
 ```
 
-预期形状：pytest 显示 `11 passed`；无网络调用、无 API key 提示。
+预期形状：pytest 显示 `13 passed`；无网络调用、无 API key 提示。
 
 ```bash
 cd reference-implementation

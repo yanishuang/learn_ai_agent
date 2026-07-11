@@ -27,7 +27,9 @@ not use time, randomness, environment state, or the network.
 | Exact fixture phrase | Deterministic behavior |
 | --- | --- |
 | `什么是 Agent？` | Returns the fixed plain answer. |
+| `查询订单` | Returns a fixed clarification and does not call a tool. |
 | `查询订单 O1001` | Calls `query_order_status` with only `{"order_id": "O1001"}`. |
+| `先解释 Agent，再查询订单 O1001` | Calls the order tool once, then returns a fixed combined answer. |
 | `[fixture:timeout]` | Raises `ModelTimeoutError`. |
 | `[fixture:invalid-output]` | Raises `InvalidModelOutputError`. |
 | `[fixture:repeated-order-call]` | Emits the same order tool call on every invocation. |

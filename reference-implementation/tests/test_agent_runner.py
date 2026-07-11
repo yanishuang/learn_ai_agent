@@ -19,6 +19,8 @@ from agent_course.core import (
     ToolDefinition,
 )
 from agent_course.models.fake import (
+    MISSING_ORDER_ARGUMENT_FIXTURE,
+    MULTI_INTENT_FIXTURE,
     ORDER_QUERY_FIXTURE,
     REPEATED_CALL_FIXTURE,
     FakeModelGateway,
@@ -104,6 +106,42 @@ async def test_normal_order_fixture_calls_tool_then_finishes() -> None:
     with pytest.raises(TypeError):
         result.model_tool_calls[0].arguments["order_id"] = "O9999"
     assert result.model_tool_calls[0].arguments == {"order_id": "O1001"}
+
+
+@pytest.mark.asyncio
+async def test_missing_order_argument_clarifies_without_tool_use() -> None:
+    result = await make_runner().run(
+        MISSING_ORDER_ARGUMENT_FIXTURE,
+        make_context(),
+        make_limits(),
+    )
+
+    assert result.stop_reason is StopReason.COMPLETED
+    assert result.final_content == "请提供要查询的订单号。"
+    assert result.model_tool_calls == ()
+    assert result.tool_results == ()
+    assert result.model_turn_count == 1
+
+
+@pytest.mark.asyncio
+async def test_multi_intent_decomposes_to_tool_and_combined_answer() -> None:
+    result = await make_runner().run(
+        MULTI_INTENT_FIXTURE,
+        make_context(),
+        make_limits(),
+    )
+
+    assert result.stop_reason is StopReason.COMPLETED
+    assert result.final_content == (
+        "Agent 是在边界内使用模型、工具和状态完成任务的应用程序；"
+        "订单 O1001 当前状态为 shipped。"
+    )
+    assert [call.name for call in result.model_tool_calls] == [
+        "query_order_status"
+    ]
+    assert result.model_tool_calls[0].arguments == {"order_id": "O1001"}
+    assert [tool_result.code for tool_result in result.tool_results] == ["OK"]
+    assert result.model_turn_count == 2
 
 
 @pytest.mark.asyncio

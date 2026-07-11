@@ -4,7 +4,7 @@
 
 ## Chapter 02
 
-正确判断是：Fake 的精确输入产生固定直接回答；Live 构造必须同时具备 flag、key 和显式 model。缺少门禁时在请求前失败是成功的安全行为。常见错误是给 Live adapter 默认模型、在模块导入时读取密钥，或把“客户端已构造”误说成“已发请求”。
+正确判断是：Fake 的精确输入产生固定直接回答；缺订单号 fixture 必须澄清且不调用工具，多意图 fixture 必须先调用一次订单工具再组合概念与订单答案。Live 构造必须同时具备 flag、key 和显式 model。缺少门禁时在请求前失败是成功的安全行为。常见错误是把缺参数/多意图落到泛化定义、给 Live adapter 默认模型、在模块导入时读取密钥，或把“客户端已构造”误说成“已发请求”。
 
 ## Chapter 05
 
@@ -16,7 +16,7 @@
 
 ## Chapter 07
 
-正确顺序是授权过滤、相关性打分、稳定排序、构造来自真实 hit 的 citation。跨租户高相似 chunk 不应先进入候选再过滤；否则日志、cache 或 reranker 已接触未授权数据。无授权 hit 时拒答，不让模型凭常识补全。citation 的 quote/source 必须从 hit 派生，不能让模型自由生成。
+正确顺序是授权过滤、显式 query normalization、词法相关性打分、稳定排序、构造来自真实 hit 的 citation。课程 synonym fixture 使用很小的确定性替换表，原 query 词与文档词必须零重叠；它证明预处理合同，不证明 embedding 语义检索。跨租户高相似 chunk 不应先进入候选再过滤；否则日志、cache 或 reranker 已接触未授权数据。无授权 hit 时拒答，不让模型凭常识补全。citation 的 quote/source 必须从 hit 派生，不能让模型自由生成。
 
 ## Chapter 08
 

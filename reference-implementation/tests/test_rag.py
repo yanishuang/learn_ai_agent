@@ -168,3 +168,45 @@ def test_answer_is_grounded_in_the_top_hit_and_citation() -> None:
     assert answer.answer == f"{content} [1]"
     assert answer.citations[0].quote == content
     assert answer.citations[0].quote in content
+
+
+def test_query_normalization_maps_pto_allowance_to_annual_leave_days() -> None:
+    content = "Employees receive 18 annual leave days each year."
+    assert {"pto", "allowance"}.isdisjoint(content.casefold().split())
+    retriever = InMemoryRetriever(
+        [
+            DocumentChunk(
+                chunk_id="hr-synonym",
+                document_id="hr-policy",
+                tenant_id="tenant-1",
+                title="Annual leave",
+                content=content,
+            )
+        ]
+    )
+
+    hits = retriever.search("PTO allowance", make_context(), top_k=1)
+
+    assert [hit.chunk_id for hit in hits] == ["hr-synonym"]
+    assert hits[0].citation.quote == content
+
+
+def test_query_normalization_maps_credential_renewal_to_password_reset() -> None:
+    content = "Password reset links expire after 20 minutes."
+    assert {"credential", "renewal"}.isdisjoint(content.casefold().split())
+    retriever = InMemoryRetriever(
+        [
+            DocumentChunk(
+                chunk_id="it-synonym",
+                document_id="it-help",
+                tenant_id="tenant-1",
+                title="Password reset",
+                content=content,
+            )
+        ]
+    )
+
+    hits = retriever.search("credential renewal", make_context(), top_k=1)
+
+    assert [hit.chunk_id for hit in hits] == ["it-synonym"]
+    assert hits[0].citation.quote == content

@@ -7,34 +7,24 @@
 ## 数据合同
 
 - `agent-cases.jsonl` 每行必须直接通过当前 `EvalCase.model_validate()`；该模型 `extra="forbid"`，因此版本放在 `case_id` 的 `agent-v1-` 前缀，不增加 `schema_version` 字段。
-- `rag-cases.jsonl` 使用 `rag-case-v1`，输入必须能构造 `RunContext`、`DocumentChunk` 和 `InMemoryRetriever`；expected 比较拒答、稳定 hit 顺序、citation document 和答案片段。
-- `security-cases.jsonl` 使用第 9 章的 `security-case-v1` 红队合同：威胁、输入/来源 fixture、可信 context、预期 stop/policy、禁止副作用、trace 断言、严重度和 owner。它是设计级基线，不伪装成当前 evaluator 已实现的 schema。
+- `rag-cases.jsonl` 使用 `rag-case-v1`，输入必须能构造 `RunContext`、`DocumentChunk` 和 `InMemoryRetriever`；runner 比较拒答、稳定 hit 顺序、citation document 和答案片段。synonym case 只验证显式词表替换，不宣称语义检索。
+- `security-cases.jsonl` 使用可执行的 `security-case-v1` 红队合同：威胁、确定性 target/fixture、可信 context、单一预期 outcome、禁止副作用、精确 observation、trace 断言、严重度和 owner。
 
 ## 默认离线步骤
 
 ```bash
 cd reference-implementation
-uv run --group dev --extra live pytest tests/test_evals.py tests/test_agent_runner.py -q -k 'evaluate_cases or report or trace_sink'
+uv run python ../evals/run_baseline.py --dataset all
 ```
 
-预期形状：选中的 evaluator/report/trace tests 全部通过；rate 仅对适用 case 计算，空类别为 JSON `null`。
+预期形状：退出码 0，并输出一个 JSON object；`agent`、`rag`、`security` 各为 `{"passed":12,"total":12}`。runner 实际执行 Agent、RAG、guardrail、tool registry、trace redaction 和 bounded custom model adapters，不只解析 JSON。
 
 ```bash
 cd reference-implementation
-uv run python - <<'PY'
-import json
-from pathlib import Path
-from agent_course.evals import EvalCase
-
-path = Path("../evals/agent-cases.jsonl")
-cases = [EvalCase.model_validate(json.loads(line)) for line in path.read_text().splitlines() if line.strip()]
-assert len(cases) >= 10
-assert len({case.case_id for case in cases}) == len(cases)
-print({"dataset": path.name, "cases": len(cases), "schema": "EvalCase"})
-PY
+uv run --group dev --extra live pytest tests/test_course_datasets.py tests/test_evals.py -q
 ```
 
-预期形状：单个 dict，cases 至少 10，schema 为 `EvalCase`。
+预期形状：dataset CLI contract 和 evaluator tests 全部通过；rate 仅对适用 case 计算，空类别为 JSON `null`。
 
 ## 故意失败
 
@@ -58,10 +48,11 @@ tests 注入错误参数/额外参数/过多 turns，预期 report 标记对应 
 ```bash
 python3 scripts/validate_course.py
 cd reference-implementation
+uv run python ../evals/run_baseline.py --dataset all
 uv run --group dev --extra live pytest tests/test_evals.py tests/test_agent_runner.py tests/test_rag.py tests/test_workflow.py tests/test_tools.py -q
 ```
 
-预期形状：course validator 成功，focused security/eval dependencies 全部通过。
+预期形状：course validator 成功，三个数据集均 12/12，focused security/eval dependencies 全部通过。
 
 ## 可选 Live 扩展（显式付费）
 

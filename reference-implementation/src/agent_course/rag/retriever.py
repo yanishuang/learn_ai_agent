@@ -14,10 +14,25 @@ from agent_course.rag.models import (
 _TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
 _REFUSAL = "根据当前资料无法确认。"
+_QUERY_SYNONYMS = {
+    "allowance": ("days",),
+    "credential": ("password",),
+    "pto": ("annual", "leave"),
+    "renewal": ("reset",),
+}
 
 
 def _tokens(text: str) -> frozenset[str]:
     return frozenset(token.casefold() for token in _TOKEN_PATTERN.findall(text))
+
+
+def _query_tokens(text: str) -> frozenset[str]:
+    """Replace a small documented synonym set before lexical retrieval."""
+
+    normalized: set[str] = set()
+    for token in _tokens(text):
+        normalized.update(_QUERY_SYNONYMS.get(token, (token,)))
+    return frozenset(normalized)
 
 
 def _overlap_score(query_tokens: frozenset[str], content: str) -> float:
@@ -68,7 +83,7 @@ class InMemoryRetriever:
         if top_k <= 0:
             raise ValueError("top_k must be positive")
 
-        query_tokens = _tokens(query)
+        query_tokens = _query_tokens(query)
         scored: list[tuple[float, DocumentChunk]] = []
         for chunk in self._chunks:
             if not self._is_visible(chunk, context):

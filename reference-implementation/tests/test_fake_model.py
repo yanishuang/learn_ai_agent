@@ -3,6 +3,8 @@ import pytest
 from agent_course.core import Message, StopReason, ToolDefinition
 from agent_course.models.fake import (
     INVALID_OUTPUT_FIXTURE,
+    MISSING_ORDER_ARGUMENT_FIXTURE,
+    MULTI_INTENT_FIXTURE,
     ORDER_QUERY_FIXTURE,
     PLAIN_ANSWER_FIXTURE,
     REPEATED_CALL_FIXTURE,
@@ -84,6 +86,48 @@ async def test_fake_model_returns_deterministic_plain_answer() -> None:
     assert first.stop_reason is StopReason.COMPLETED
     assert first.tool_calls == ()
     assert first.content == "Agent 是在边界内使用模型、工具和状态完成任务的应用程序。"
+
+
+@pytest.mark.asyncio
+async def test_missing_order_argument_requests_deterministic_clarification() -> None:
+    step = await FakeModelGateway().next_step(
+        messages=[Message(role="user", content=MISSING_ORDER_ARGUMENT_FIXTURE)],
+        tools=[ORDER_TOOL],
+    )
+
+    assert step.stop_reason is StopReason.COMPLETED
+    assert step.tool_calls == ()
+    assert step.content == "请提供要查询的订单号。"
+
+
+@pytest.mark.asyncio
+async def test_multi_intent_uses_order_tool_then_returns_combined_answer() -> None:
+    model = FakeModelGateway()
+    first = await model.next_step(
+        messages=[Message(role="user", content=MULTI_INTENT_FIXTURE)],
+        tools=[ORDER_TOOL],
+    )
+    second = await model.next_step(
+        messages=[
+            Message(role="user", content=MULTI_INTENT_FIXTURE),
+            Message(
+                role="tool",
+                content='{"status":"shipped"}',
+                tool_call_id="fake-query-order-status-O1001",
+            ),
+        ],
+        tools=[ORDER_TOOL],
+    )
+
+    assert first.stop_reason is StopReason.TOOL_CALLS
+    assert [call.name for call in first.tool_calls] == ["query_order_status"]
+    assert first.tool_calls[0].arguments == {"order_id": "O1001"}
+    assert second.stop_reason is StopReason.COMPLETED
+    assert second.tool_calls == ()
+    assert second.content == (
+        "Agent 是在边界内使用模型、工具和状态完成任务的应用程序；"
+        "订单 O1001 当前状态为 shipped。"
+    )
 
 
 @pytest.mark.asyncio
