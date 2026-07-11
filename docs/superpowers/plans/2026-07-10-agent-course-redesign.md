@@ -427,7 +427,7 @@ Weighted score fusion must state that scores require normalization and validatio
 
 - [ ] **Step 3: Add maturity gates to Chapter 12**
 
-Keep A2A Protocol 1.0 optional even though its published specification is stable. Teach agents-as-tools and handoffs before remote interoperability, and explain that A2A complements MCP rather than replacing it. Label Microsoft Agent Framework preview status and Google ADK A2A support maturity from primary docs. Do not make framework-specific APIs required work.
+Keep A2A Protocol 1.0 optional even though its published specification is stable. Teach agents-as-tools and handoffs before remote interoperability, and explain that A2A complements MCP rather than replacing it. Distinguish Microsoft Agent Framework's stable Python core packages from beta integrations and the preview Go implementation, and label Google ADK A2A support maturity from primary docs. Do not make framework-specific APIs required work.
 
 - [ ] **Step 4: Commit**
 
