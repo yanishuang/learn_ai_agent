@@ -829,7 +829,7 @@ Expected: both pass.
 
 ```bash
 cd reference-implementation
-uv sync --frozen --extra dev --extra live
+uv sync --frozen --group dev --extra live
 uv run ruff check .
 uv run pytest -q -m "not live"
 ```
