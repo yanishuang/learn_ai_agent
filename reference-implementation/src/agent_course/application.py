@@ -54,6 +54,8 @@ _RUN_STATUS_BY_STOP_REASON: dict[StopReason, AgentRunStatus] = {
 
 
 class AgentRunner(Protocol):
+    traces: InMemoryTraceSink
+
     async def run(
         self,
         question: str,
@@ -136,10 +138,19 @@ class CourseApplication:
     agent_runner: AgentRunner
     retriever: Retriever
     workflow: ResearchWorkflow
-    traces: InMemoryTraceSink = field(default_factory=InMemoryTraceSink)
+    traces: InMemoryTraceSink | None = None
     _runs: dict[str, AgentRunRecord] = field(default_factory=dict, init=False)
     _events: dict[str, list[AgentRunEvent]] = field(default_factory=dict, init=False)
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        runner_traces = self.agent_runner.traces
+        if self.traces is None:
+            self.traces = runner_traces
+        elif self.traces is not runner_traces:
+            raise ValueError(
+                "CourseApplication and agent_runner must use the same trace sink"
+            )
 
     async def run_agent(
         self,
@@ -163,13 +174,15 @@ class CourseApplication:
     ) -> KnowEngineScenarioResult:
         """Run the deterministic capstone path as one trace and one causal flow."""
 
-        trace_id = self.traces.start_trace(context)
+        traces = self.traces
+        assert traces is not None
+        trace_id = traces.start_trace(context)
         rag_answer = self.retriever.answer(
             "paid annual leave days",
             context,
             top_k=1,
         )
-        self.traces.record(
+        traces.record(
             trace_id,
             "retrieval.completed",
             {
@@ -215,7 +228,7 @@ class CourseApplication:
             ),
             agent_result,
         )
-        self.traces.record(
+        traces.record(
             trace_id,
             "evaluation.completed",
             {"passed": evaluation.passed, "failures": list(evaluation.failures)},
@@ -224,7 +237,7 @@ class CourseApplication:
             raise RuntimeError("Know-Engine fixture failed deterministic evaluation")
 
         started = self.workflow.start("annual leave follow-up", context)
-        self.traces.record(
+        traces.record(
             trace_id,
             "workflow.started",
             {"run_id": started.run_id, "status": started.status},
@@ -240,19 +253,19 @@ class CourseApplication:
             ),
             context,
         )
-        self.traces.record(
+        traces.record(
             trace_id,
             "workflow.approved",
             {"run_id": approved.run_id, "status": approved.status},
         )
         completed = self.workflow.resume(approved.run_id, context)
-        self.traces.record(
+        traces.record(
             trace_id,
             "workflow.completed",
             {"run_id": completed.run_id, "status": completed.status},
         )
         statuses = (started.status, approved.status, completed.status)
-        self.traces.record(
+        traces.record(
             trace_id,
             "know_engine.completed",
             {"workflow_statuses": [status.value for status in statuses]},

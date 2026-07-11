@@ -116,8 +116,9 @@ Outcome: all eight Important findings and the Minor finding in
   pinned SHA-256 contract before any call.
 - `structuredContent` is validated with a strict local Pydantic model, including
   nonblank fields, no extras, and requested-order ID equality.
-- Focused tests cover protocol drift, unexpected/missing/duplicate tools, schema
-  drift, invalid output, business error, timeout, and process cleanup.
+- Focused tests cover protocol drift, an extra unexpected tool, schema drift,
+  invalid output, business error, timeout, and process cleanup. They do not
+  claim separate missing-tool or duplicate-tool cases.
 - The real current local server under the pinned MCP SDK 1.x completed a stdio
   exchange successfully.
 
@@ -142,7 +143,7 @@ the full matrix:
 | --- | --- | --- |
 | Provider allowance, Responses statuses, tool/API errors | New focused assertions initially produced 15 expected failures | Core/runner/tool/live/API focused suite passed; final combined focused suite: 176 passed |
 | Integrated Know-Engine and explicit trajectory/security | New application/evaluator/dataset assertions initially produced 4 expected failures | Application/evaluator/dataset slice: 16 passed; exact API/application final check: 14 passed |
-| MCP protocol/allowlist/schema/output | New client contract tests initially produced 7 expected failures with 2 existing cleanup tests passing | `tests/test_mcp.py`: 9 passed; adjacent MCP/tool/runner slice: 38 passed |
+| MCP protocol/allowlist/schema/output | Targeted protocol, allowlist, schema, and output assertions failed before implementation | `tests/test_mcp.py`: 9 passed; adjacent MCP/tool/runner slice: 38 passed |
 | Chapter contract validator | New missing-contract/scoring tests initially produced 2 expected failures | Root validator suite: 25 passed; repository validator passed |
 
 The implementation was added only after each corresponding red assertion was
@@ -191,7 +192,7 @@ not affect behavior or pass status.
 | 07 | RAG/API filter command: 9 passed, 12 deselected, 1 warning |
 | 08 | Workflow/API command: 10 passed, 13 deselected, 1 warning |
 | 09 | Validator passed; all baselines 12/12; dependency command 58 passed; dataset/evaluator command 15 passed; targeted argument/turn command 2 passed, 9 deselected |
-| 10 | MCP/tool/runner command: 38 passed; cleanup/timeout command: 2 passed, 7 deselected |
+| 10 | `pytest tests/test_mcp.py tests/test_tools.py -q`: 20 passed; broader `pytest tests/test_mcp.py tests/test_tools.py tests/test_agent_runner.py -q`: 38 passed; cleanup/timeout command: 2 passed, 7 deselected |
 
 ### Exact local MCP checks
 
@@ -223,3 +224,60 @@ No remote MCP endpoint was contacted.
 - No blocking or behavioral concern remains from the final-review findings.
 - The one non-blocking Starlette/httpx deprecation warning is recorded above;
   changing dependency strategy was outside this focused fix wave.
+
+## Second whole-branch review follow-up
+
+Date: 2026-07-11
+
+### Trace ownership invariant
+
+- `BoundedAgentRunner.traces` is the authoritative sink for
+  `CourseApplication`.
+- Direct construction without a `traces` argument adopts the runner's exact
+  sink object.
+- Direct construction with a different explicit sink raises `ValueError`
+  before any run can split its trace.
+- `AgentRunner` declares the sink in its provider-neutral application protocol.
+- The offline factory continues to pass and expose one shared sink.
+- The application status map has a regression assertion proving its keys equal
+  the complete current `StopReason` enum.
+
+TDD evidence:
+
+| Command | Result |
+| --- | --- |
+| `pytest tests/test_application.py -q` before implementation | expected red: 2 failed, 2 passed; omission used a second sink and explicit mismatch did not raise |
+| `pytest tests/test_application.py -q` after implementation | 4 passed |
+| `pytest tests/test_application.py tests/test_api.py -q` | 17 passed, 1 warning |
+
+### Corrected MCP evidence
+
+The MCP test suite has one exact extra-tool allowlist case. It does not contain
+separate missing-tool or duplicate-tool tests, and this report no longer claims
+that it does.
+
+| Exact command | Result |
+| --- | --- |
+| `pytest tests/test_mcp.py -q` | 9 passed |
+| `pytest tests/test_mcp.py tests/test_tools.py -q` | 20 passed |
+| `pytest tests/test_mcp.py tests/test_tools.py tests/test_agent_runner.py -q` | 38 passed |
+
+### Second-review final verification
+
+All reference commands used the frozen environment with Live credentials
+removed, `AGENT_COURSE_LIVE_TESTS=0`, and `UV_OFFLINE=1` where applicable.
+
+| Working directory | Exact command | Result |
+| --- | --- | --- |
+| reference implementation | `uv lock --check` | exit 0; resolved 52 packages |
+| reference implementation | `uv run --frozen --no-sync --group dev --extra live ruff check .` | `All checks passed!` |
+| reference implementation | `uv run --frozen --no-sync --group dev --extra live pytest -q -m 'not live'` | 211 passed, 1 warning |
+| repository root | `python3 -m pytest tests/test_validate_course.py -q` | 25 passed |
+| repository root | `python3 scripts/validate_course.py` | `course validation passed` |
+| repository root | `git diff --check` | exit 0 |
+| repository root | `git diff --check a26755d` | exit 0 before commit |
+| repository root | `git diff --check a26755d..HEAD` | exit 0 after commit |
+
+The warning remains the previously recorded FastAPI/Starlette `TestClient`
+deprecation. No Live, network, paid, or remote MCP call was made, and nothing
+was pushed.
