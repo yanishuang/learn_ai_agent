@@ -146,7 +146,7 @@ MCP 接工具/资源/上下文，A2A 处理远程 Agent 任务协作；A2A 不�
 
 这些 `dodo.*` 命令和目录是学员项目必须实现的接口，当前 reference 不提供。每个 milestone 的 `evidence/dN/` 保存命令、machine-readable 输出、成功与失败 case、版本和限制。
 
-**D5 的四个 gate 全部是 Advanced-only，彼此独立，也不能补偿 Core 失败。** 以下命令是学员项目约定的精确可执行证据接口；当前 reference 尚未创建这些模块、测试、fixture 或目录，只有学员实现对应 Advanced 能力后才能运行并声称通过：
+**D5 的四个 gate 全部是 Advanced-only，彼此独立，也不能补偿 Core 失败。** 以下命令是学员项目约定的精确可执行证据接口；这些模块、测试、fixture 和目录由学员的 Advanced 项目实现，不属于课程 reference implementation 的交付范围，只有对应代码存在后才能运行并声称通过：
 
 ```bash
 # Advanced-only: ResearchAgent allowlist、引用、egress 与 budget

@@ -120,6 +120,10 @@ class StopReason(StrEnum):
     TIMEOUT = "timeout"
     REPEATED_TOOL_CALL = "repeated_tool_call"
     MODEL_ERROR = "model_error"
+    MODEL_INCOMPLETE = "model_incomplete"
+    CONTENT_FILTER = "content_filter"
+    CANCELLED = "cancelled"
+    TOOL_ERROR = "tool_error"
     PERMISSION_DENIED = "permission_denied"
     POLICY_DENIED = "policy_denied"
 
@@ -182,4 +186,5 @@ class ModelGateway(Protocol):
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep: ...

@@ -5,7 +5,9 @@ from agent_course.evals.runner import (
     EvalCaseResult,
     EvalReport,
     EvaluationApplication,
+    ExpectedToolCall,
     evaluate_cases,
+    evaluate_result,
 )
 
 __all__ = [
@@ -13,5 +15,7 @@ __all__ = [
     "EvalCaseResult",
     "EvalReport",
     "EvaluationApplication",
+    "ExpectedToolCall",
     "evaluate_cases",
+    "evaluate_result",
 ]

@@ -214,7 +214,7 @@ limit 20
 
 ## 学员实验
 
-Task 11 将创建 `labs/chapter-11/`；该目录不在本次提交中。当前实验使用独立 Python 草稿和参考测试：
+本章没有单独的 Core lab 目录，因为它是 enrichment。Advanced 学员在自己的提交中使用独立 Python 草稿和新增测试完成：
 
 1. 保存第 7 章检索结果作为 baseline。
 2. 为固定 vector/keyword rankings 运行 `reciprocal_rank_fusion()`，测试重复候选、空 ranking 和稳定顺序。
@@ -256,7 +256,7 @@ cd reference-implementation
 uv run --group dev --extra live pytest -q
 ```
 
-RRF fence 还应通过 Python AST/直接执行检查。当前参考 suite 验证基础检索、真实 quote、租户/用户/权限过滤和拒答；它尚未验证 RRF、rerank、数据库 AST 或真实凭证。后者必须在 Task 11 lab 或 Production 实现中增加确定性测试后才能声称完成。
+RRF fence 还应通过 Python AST/直接执行检查。当前参考 suite 验证基础检索、真实 quote、租户/用户/权限过滤和拒答；它尚未验证 RRF、rerank、数据库 AST 或真实凭证。后者必须由学习者在 Advanced/Production 实现中增加确定性测试后才能声称完成。
 
 ## 作业与评分
 

@@ -184,22 +184,11 @@ flowchart TD
 - 新增一个工具必须经过 schema、权限、日志、风险等级配置。
 - 每次回答都能追踪 Prompt、检索、工具、token、耗时和错误。
 
-## 12 周落地可行性
+## 学习安排的单一来源
 
-| 周次 | 主线 | 可行性判断 |
-| --- | --- | --- |
-| 1 | 概念、模型调用、Prompt | Python 可以快速完成，低风险 |
-| 2 | FastAPI、结构化输出、流式响应 | Python 成熟，低风险 |
-| 3 | Tool Calling | Python function tool + Pydantic 可落地，中低风险 |
-| 4 | 基础 RAG | 文档解析和 pgvector 可落地，中风险 |
-| 5 | 高级 RAG | 混合检索、rerank 需要调参，中风险 |
-| 6 | 多源路由 | SQL/图谱查询要控制权限，中高风险 |
-| 7 | ReAct Agent | 可落地，但要限制轮数和工具权限，中风险 |
-| 8 | Workflow | LangGraph 或自研状态机可落地，中风险 |
-| 9 | MCP | Python 先实现，Go 可选扩展，中风险 |
-| 10 | 多 Agent | 可以做 MVP，但要防止过度设计，中高风险 |
-| 11 | 工程化 | 需要日志、评估、权限配合，中高风险 |
-| 12 | 项目整合 | 取决于前 11 周是否持续验收，中风险 |
+本文件只判断 Python/Go 的工程可行性，不维护第二份周计划。12 周授课顺序以[课程大纲](../teaching/12-week-syllabus.md)为准，16-20 周路径以[自学计划](../teaching/16-20-week-self-study.md)为准；两者共享同一验收标准。
+
+核心路径先完成 Know-Engine 的单 Agent、RAG、Workflow、MCP、评估和治理闭环。高级 RAG、多源路由、多 Agent、A2A 与 Dodo-Agent 只作为 enrichment；它们不会因为技术可行就自动进入 12 周必修周次。
 
 ## 风险与应对
 
@@ -236,8 +225,8 @@ flowchart TD
 
 项目阶段：
 
-- Know-Engine 作为 12 周主项目，用 Python 完成 RAG MVP、混合检索、引用、权限和评估闭环。
-- Dodo-Agent 作为进阶 MVP，用 Python 完成单 Agent、Workflow 和 MCP 接入雏形。
+- Know-Engine 作为 12 周主项目，用 Python 完成确定性 RAG MVP、引用、权限和评估闭环；混合检索只在 Core 通过后作为 enrichment 进入。
+- Dodo-Agent 只作为 Know-Engine Core 通过后的进阶 enrichment，从一个 Router 和两个 specialist 起步；不进入核心排期。
 - Go 只承接稳定工具、MCP Server、网关和后台 worker。
 
 生产阶段：

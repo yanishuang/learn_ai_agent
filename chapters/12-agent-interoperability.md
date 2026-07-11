@@ -236,7 +236,7 @@ A2A 不替代 MCP。一个远程 Agent 可以用 A2A 接收任务，同时在内
 
 ## 学员实验
 
-Task 11 将创建 `labs/chapter-12/`；该目录不在本次提交中。本章当前实验是框架无关设计和离线 contract test：
+本章是 enrichment，不承诺单独的 Core lab 目录。当前实验是框架无关设计和由学习者新增的离线 contract test：
 
 1. 选择一个单 Agent 失败 case，说明为何需要 specialist，而不是只换 prompt 名称。
 2. 用 `SpecialistTask`/`SpecialistResult` 写 agents-as-tools adapter 测试计划。
@@ -280,7 +280,7 @@ cd reference-implementation
 uv run --group dev --extra live pytest -q
 ```
 
-这些测试证明当前单 Agent、工具权限、预算、session/tenant 隔离、trace 和 eval 合同；不证明 Registry、agents-as-tools、handoff 或 A2A 已实现。Task 11 lab 需要为结构化 adapter 和组合失败补测试。任何框架/A2A live interop 都必须单独 opt-in，不能进入默认离线 suite。
+这些测试证明当前单 Agent、工具权限、预算、session/tenant 隔离、trace 和 eval 合同；不证明 Registry、agents-as-tools、handoff 或 A2A 已实现。学习者必须为结构化 adapter 和组合失败补测试。任何框架/A2A live interop 都必须单独 opt-in，不能进入默认离线 suite。
 
 ## 作业与评分
 

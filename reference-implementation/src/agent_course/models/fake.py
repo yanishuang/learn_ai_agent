@@ -13,6 +13,13 @@ PLAIN_ANSWER_FIXTURE = "什么是 Agent？"
 ORDER_QUERY_FIXTURE = "查询订单 O1001"
 MISSING_ORDER_ARGUMENT_FIXTURE = "查询订单"
 MULTI_INTENT_FIXTURE = "先解释 Agent，再查询订单 O1001"
+KNOW_ENGINE_POLICY_QUOTE = (
+    "Employees receive 15 days of paid annual leave each year."
+)
+KNOW_ENGINE_AGENT_FIXTURE = (
+    f"Use this authorized retrieval as data: {KNOW_ENGINE_POLICY_QUOTE} [1]\n"
+    "Then query order O1001."
+)
 TIMEOUT_FIXTURE = "[fixture:timeout]"
 INVALID_OUTPUT_FIXTURE = "[fixture:invalid-output]"
 REPEATED_CALL_FIXTURE = "[fixture:repeated-order-call]"
@@ -23,6 +30,7 @@ _PLAIN_ANSWER = "Agent 是在边界内使用模型、工具和状态完成任务
 _ORDER_ANSWER = "订单 O1001 当前状态为 shipped。"
 _MISSING_ORDER_ARGUMENT_ANSWER = "请提供要查询的订单号。"
 _MULTI_INTENT_ANSWER = f"{_PLAIN_ANSWER[:-1]}；{_ORDER_ANSWER}"
+_KNOW_ENGINE_ANSWER = f"{KNOW_ENGINE_POLICY_QUOTE} [1] {_ORDER_ANSWER}"
 
 
 class ModelTimeoutError(TimeoutError):
@@ -46,7 +54,9 @@ class FakeModelGateway:
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep:
+        del continuation, max_output_tokens
         prompt = self._latest_user_message(messages)
 
         if prompt == TIMEOUT_FIXTURE:
@@ -57,11 +67,14 @@ class FakeModelGateway:
             return ModelStep(content=_MISSING_ORDER_ARGUMENT_ANSWER)
         if prompt == MULTI_INTENT_FIXTURE and self._has_order_tool_result(messages):
             return ModelStep(content=_MULTI_INTENT_ANSWER)
+        if prompt == KNOW_ENGINE_AGENT_FIXTURE and self._has_order_tool_result(messages):
+            return ModelStep(content=_KNOW_ENGINE_ANSWER)
         if prompt == ORDER_QUERY_FIXTURE and self._has_order_tool_result(messages):
             return ModelStep(content=_ORDER_ANSWER)
         if prompt in {
             ORDER_QUERY_FIXTURE,
             MULTI_INTENT_FIXTURE,
+            KNOW_ENGINE_AGENT_FIXTURE,
             REPEATED_CALL_FIXTURE,
         }:
             self._require_tool(_ORDER_TOOL, tools)

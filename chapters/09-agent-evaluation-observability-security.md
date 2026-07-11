@@ -71,8 +71,7 @@ LLM judge 适合规则难以完整描述的维度，例如说明是否完整、�
 | `context` | 完整可信 `RunContext` |
 | `limits` | 本 case 的实际 `RunLimits` |
 | `expected_answer_contains` | final content 必须包含的全部字符串 |
-| `expected_tool_name` | 期望唯一工具调用；`None` 表示该类指标不适用 |
-| `expected_tool_arguments` | 与模型调用证据做规范 JSON 精确比较 |
+| `expected_tool_calls` | 必填的有序工具调用序列；元素含 `name` 与精确 `arguments`，无工具时显式写 `[]` |
 | `expected_stop_reason` | 默认 `completed` |
 | `expect_unauthorized_action_blocked` | 需要验证拒绝且没有成功工具结果 |
 | `max_turns` | case 级轨迹上限，默认 4 |
@@ -133,8 +132,12 @@ def order_case() -> EvalCase:
             timeout_seconds=0.2,
         ),
         expected_answer_contains=("shipped",),
-        expected_tool_name="query_order_status",
-        expected_tool_arguments={"order_id": "O1001"},
+        expected_tool_calls=(
+            {
+                "name": "query_order_status",
+                "arguments": {"order_id": "O1001"},
+            },
+        ),
         max_turns=2,
     )
 
@@ -163,7 +166,7 @@ async def evaluate(app: CourseApplication) -> str:
 | 延迟 | **设计练习** | case/step p50、p95、p99 与 timeout rate；当前 report 没有 latency |
 | 成本 | **设计练习** | input/output/cached token、tool/API 费用、每成功任务成本；当前 report 没有 cost |
 
-没有适用 case 的聚合返回 `None`，而不是 0。例如没有工具期望时，`tool_selection_accuracy is None`；这表示“不适用”，不是“准确率为零”。空数据集的所有 rate 和 average 都是 `None`。
+`expected_tool_calls` 对每个 `EvalCase` 都是必填，所以 tool selection 与 argument accuracy 总有明确分母：无工具时写 `[]`，意外调用会失败。只有可选安全类别没有适用 case 时，对应 block rate 才返回 `None`；空数据集的所有 rate 和 average 都是 `None`。
 
 #### 任务指标
 
@@ -235,13 +238,13 @@ Trace grading 可先做确定性规则：
 
 ### 9.6 Dataset regression
 
-Task 11 计划创建三个机器可读数据集：
+三个机器可读 baseline 已提交并由同一离线 runner 执行：
 
-- `evals/agent-cases.jsonl`
-- `evals/rag-cases.jsonl`
-- `evals/security-cases.jsonl`
+- [Agent cases](../evals/agent-cases.jsonl)
+- [RAG cases](../evals/rag-cases.jsonl)
+- [Security cases](../evals/security-cases.jsonl)
 
-这些路径在本次 Task 5 提交中尚未创建，当前 validator 也不会把它们误当作现有链接。Task 11 要求每个文件至少十条 case：Agent 覆盖直接回答、正确工具、缺参数、多意图、预算停止和未授权请求；RAG 覆盖可答、不可答、同义表达、引用和租户隔离；Security 覆盖直接/间接注入、tool-output injection、exfiltration、privilege escalation 和 denial-of-wallet。
+每个文件当前有 12 条 case：Agent 覆盖直接回答、显式空/非空工具轨迹、缺参数、多意图、预算停止和未授权请求；RAG 覆盖可答、不可答、同义表达、引用和租户隔离；Security 覆盖直接/间接注入、tool-output injection、exfiltration、privilege escalation 和 denial-of-wallet。间接文档注入 case 会把恶意检索文本交给 bounded Agent，并断言后端 export handler 执行次数为 0，而不是只停在 retrieval 测试。
 
 Regression 流程：
 
@@ -342,12 +345,12 @@ Live repeated runs 会产生费用，必须显式启用、设置预算并与默�
 
 ## 学员实验
 
-Task 11 计划创建本章实验目录 `labs/chapter-09/`；该目录在本次 Task 5 提交中尚未创建，因此这里仅保留准确路径，不宣称当前存在可运行 README。
+按 [Lab 09：离线评估、Trace 与红队数据](../labs/chapter-09/README.md) 完成本章实验；默认命令会执行三个 JSONL baseline，而不只是解析文件。
 
 实验任务：
 
 1. 为 direct、tool、wrong args、unauthorized 和 budget stop 建立 `EvalCase`。
-2. 输出当前五类聚合，并解释 `None` 与 0 的差异。
+2. 输出当前五类聚合；解释显式空工具序列仍参与 trajectory/argument 分母，而没有适用安全 case 时 block rate 才为 `None`。
 3. 增加 trace grading 规则，至少检查事件顺序、result/trace stop reason 和 secret absence。
 4. 设计 latency/cost 扩展 schema，明确 unknown usage 和价格版本。
 5. 为随机 Live 路径设计重复运行和 judge calibration，不把它加入默认离线 CI。
@@ -377,7 +380,7 @@ uv run --group dev --extra live pytest \
 | 正确工具 + 额外参数 | `argument_accuracy` | canonical JSON 和 strict schema |
 | 回复说“拒绝”但工具成功 | `unauthorized_action` | stop reason 与所有 tool results |
 | 轮数超 case 上限 | `turn_count` | model turn 计数与 limits |
-| 没有工具 case | tool/argument rate 为 `None` | 指标分母过滤 |
+| 期望 `[]` 却出现工具 | `tool_selection` 与 `argument_accuracy` 失败 | 显式空序列不能表示“不评分” |
 | trace 中出现 secret | 脱敏测试失败 | storage-boundary sanitizer |
 | judge 与人类分歧集中在某语言 | calibration slice 失败 | rubric/example/model bias |
 | 平均延迟稳定但 p95 激增 | online SLO 失败 | tool/queue/retry 分解 |
@@ -394,11 +397,11 @@ uv run --group dev --extra live pytest \
 - case 排序和同一 report/固定 trace ID 的 JSON 序列化稳定；fresh run 需先规范化易变 trace ID 才能做字节级 baseline 比较；
 - 伪造 tool result 不能替代模型调用证据；
 - 不回显参数的 tool result 仍可从 model call 正确评分；
-- 无适用 case 和空 report 的聚合为 `None`。
+- 显式空工具轨迹参与 tool/argument 指标；无适用安全 case 与空 report 的对应聚合为 `None`。
 
 `tests/test_agent_runner.py` 还验证预算、权限、策略、不可变轨迹和 trace 脱敏；`tests/test_rag.py` 验证授权与引用；`tests/test_workflow.py` 验证审批和幂等。这些确定性测试应先于任何 judge。
 
-文档验收还应确认七类指标全部说明、implemented/design exercise 标签准确、offline/online 与 calibration/repeated runs 完整、红队和响应流程完整、没有把 confidence 当控制、Python fence 可解析、计划路径没有形成失效链接。
+文档验收还应确认七类指标全部说明、implemented/design exercise 标签准确、offline/online 与 calibration/repeated runs 完整、红队和响应流程完整、没有把 confidence 当控制、Python fence 可解析、Lab 09 与三个 baseline 链接可验证。
 
 ## 作业与评分
 

@@ -22,14 +22,25 @@ class EvalModel(FrozenModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class ExpectedToolCall(EvalModel):
+    name: str
+    arguments: dict[str, JsonValue]
+
+    @field_validator("name")
+    @classmethod
+    def name_must_be_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("expected tool names must be nonblank")
+        return value
+
+
 class EvalCase(EvalModel):
     case_id: str
     question: str
     context: RunContext
     limits: RunLimits
     expected_answer_contains: tuple[str, ...] = ()
-    expected_tool_name: str | None = None
-    expected_tool_arguments: dict[str, JsonValue] | None = None
+    expected_tool_calls: tuple[ExpectedToolCall, ...]
     expected_stop_reason: StopReason = StopReason.COMPLETED
     expect_unauthorized_action_blocked: bool = False
     max_turns: int = Field(default=4, ge=1)
@@ -88,7 +99,7 @@ async def evaluate_cases(
     results: list[EvalCaseResult] = []
     for case in ordered_cases:
         outcome = await app.run_agent(case.question, case.context, case.limits)
-        results.append(_evaluate_case(case, outcome))
+        results.append(evaluate_result(case, outcome))
 
     return EvalReport(
         total_cases=len(results),
@@ -96,18 +107,10 @@ async def evaluate_cases(
         failed_cases=sum(not result.passed for result in results),
         task_success_rate=_rate([result.task_success for result in results]),
         tool_selection_accuracy=_rate(
-            [
-                result.tool_selection_correct
-                for case, result in zip(ordered_cases, results, strict=True)
-                if case.expected_tool_name is not None
-            ]
+            [result.tool_selection_correct for result in results]
         ),
         argument_accuracy=_rate(
-            [
-                result.arguments_correct
-                for case, result in zip(ordered_cases, results, strict=True)
-                if case.expected_tool_arguments is not None
-            ]
+            [result.arguments_correct for result in results]
         ),
         unauthorized_action_block_rate=_rate(
             [
@@ -125,7 +128,9 @@ async def evaluate_cases(
     )
 
 
-def _evaluate_case(case: EvalCase, outcome: AgentResult) -> EvalCaseResult:
+def evaluate_result(case: EvalCase, outcome: AgentResult) -> EvalCaseResult:
+    """Score one already-executed result against its explicit trajectory contract."""
+
     content = outcome.final_content or ""
     task_success = (
         outcome.stop_reason is case.expected_stop_reason
@@ -161,22 +166,23 @@ def _evaluate_case(case: EvalCase, outcome: AgentResult) -> EvalCaseResult:
 
 
 def _tool_selection_correct(case: EvalCase, outcome: AgentResult) -> bool:
-    if case.expected_tool_name is None:
-        return True
     selected = [call.name for call in outcome.model_tool_calls]
-    return selected == [case.expected_tool_name]
+    return selected == [call.name for call in case.expected_tool_calls]
 
 
 def _arguments_correct(case: EvalCase, outcome: AgentResult) -> bool:
-    if case.expected_tool_arguments is None:
-        return True
-    for call in outcome.model_tool_calls:
-        if call.name != case.expected_tool_name:
-            continue
-        return _canonical_json(call.arguments) == _canonical_json(
-            case.expected_tool_arguments
+    actual_calls = outcome.model_tool_calls
+    if len(actual_calls) != len(case.expected_tool_calls):
+        return False
+    return all(
+        actual.name == expected.name
+        and _canonical_json(actual.arguments) == _canonical_json(expected.arguments)
+        for actual, expected in zip(
+            actual_calls,
+            case.expected_tool_calls,
+            strict=True,
         )
-    return False
+    )
 
 
 def _unauthorized_action_blocked(case: EvalCase, outcome: AgentResult) -> bool:
@@ -208,5 +214,7 @@ __all__ = [
     "EvalCaseResult",
     "EvalReport",
     "EvaluationApplication",
+    "ExpectedToolCall",
     "evaluate_cases",
+    "evaluate_result",
 ]

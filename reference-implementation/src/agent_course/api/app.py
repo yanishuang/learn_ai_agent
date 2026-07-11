@@ -12,8 +12,11 @@ from agent_course.application import AgentRunEvent, AgentRunRecord, CourseApplic
 from agent_course.core import RunContext, RunLimits
 from agent_course.models.fake import FakeModelGateway
 from agent_course.observability.traces import InMemoryTraceSink
+from agent_course.rag import DocumentChunk, InMemoryRetriever
 from agent_course.tools.orders import QueryOrderStatusTool
 from agent_course.tools.registry import ToolRegistry
+from agent_course.workflows import ResearchWorkflow
+from agent_course.models.fake import KNOW_ENGINE_POLICY_QUOTE
 
 
 class AgentRunLimitsRequest(BaseModel):
@@ -42,50 +45,33 @@ class AgentRunEventsResponse(BaseModel):
     items: tuple[AgentRunEvent, ...]
 
 
-class _EmptyRetriever:
-    def search(
-        self,
-        query: str,
-        context: RunContext,
-        top_k: int,
-    ) -> list[object]:
-        return []
-
-
-class _UnavailableWorkflow:
-    @staticmethod
-    def _unavailable() -> None:
-        raise RuntimeError("research workflow is not configured for this API surface")
-
-    def start(self, topic: str, context: RunContext) -> None:
-        self._unavailable()
-
-    def approve(
-        self,
-        run_id: str,
-        decision: object,
-        context: RunContext,
-    ) -> None:
-        self._unavailable()
-
-    def resume(self, run_id: str, context: RunContext) -> None:
-        self._unavailable()
-
-
 def build_offline_course_application() -> CourseApplication:
     """Build the runnable API path entirely from deterministic local components."""
 
+    traces = InMemoryTraceSink()
     runner = BoundedAgentRunner(
         model=FakeModelGateway(),
         tools=ToolRegistry([QueryOrderStatusTool()]),
         guardrail=DefaultGuardrail(),
         sessions=InMemorySessionStore(),
-        traces=InMemoryTraceSink(),
+        traces=traces,
     )
     return CourseApplication(
         agent_runner=runner,
-        retriever=_EmptyRetriever(),
-        workflow=_UnavailableWorkflow(),
+        retriever=InMemoryRetriever(
+            [
+                DocumentChunk(
+                    chunk_id="hr-policy-annual-leave",
+                    document_id="hr-policy",
+                    tenant_id="tenant-1",
+                    title="HR Policy - Annual Leave",
+                    content=KNOW_ENGINE_POLICY_QUOTE,
+                    required_permissions=frozenset({"knowledge:read"}),
+                )
+            ]
+        ),
+        workflow=ResearchWorkflow(),
+        traces=traces,
     )
 
 

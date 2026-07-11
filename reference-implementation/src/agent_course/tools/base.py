@@ -64,7 +64,15 @@ class StructuredTool(ABC, Generic[ArgumentsT]):
                 error="required permission is missing",
             )
 
-        return await self._execute(validated, context)
+        try:
+            return await self._execute(validated, context)
+        except Exception:
+            return ToolResult(
+                name=self.name,
+                code="TOOL_ERROR",
+                success=False,
+                error="tool handler failed",
+            )
 
     @abstractmethod
     async def _execute(

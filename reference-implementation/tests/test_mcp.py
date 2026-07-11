@@ -1,13 +1,43 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from agent_course.mcp import client as mcp_client
 from agent_course.mcp.client import (
+    McpClientError,
     McpClientTimeoutError,
     query_order_status_via_stdio,
 )
+
+
+EXPECTED_INPUT_SCHEMA = {
+    "properties": {"order_id": {"title": "Order Id", "type": "string"}},
+    "required": ["order_id"],
+    "title": "query_order_statusArguments",
+    "type": "object",
+}
+EXPECTED_OUTPUT_SCHEMA = {
+    "additionalProperties": {"type": "string"},
+    "title": "query_order_statusDictOutput",
+    "type": "object",
+}
+EXPECTED_SCHEMA_HASH = "7a448988ed2170c6a8f029bd6cc2e5113676bc65ecee91ca9eb3d75a1888fdb2"
+
+
+def contract_tool(
+    *,
+    name: str = "query_order_status",
+    input_schema: dict[str, object] | None = None,
+    output_schema: dict[str, object] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name,
+        inputSchema=input_schema or EXPECTED_INPUT_SCHEMA,
+        outputSchema=output_schema or EXPECTED_OUTPUT_SCHEMA,
+    )
 
 
 @pytest.mark.asyncio
@@ -19,13 +49,79 @@ async def test_stdio_server_lists_and_calls_order_tool_with_structured_result() 
         timeout_seconds=5.0,
     )
 
-    assert "query_order_status" in exchange.tool_names
+    assert exchange.protocol_version == "2025-11-25"
+    assert exchange.tool_names == ("query_order_status",)
+    assert exchange.tool_schema_hashes == {
+        "query_order_status": EXPECTED_SCHEMA_HASH
+    }
     assert exchange.structured_result == {
         "order_id": "O1001",
         "status": "shipped",
         "tenant_id": "tenant-1",
         "requested_by": "mcp-user",
     }
+
+
+def test_client_rejects_nonbaseline_protocol_before_tool_call() -> None:
+    with pytest.raises(McpClientError, match="protocol.*2025-11-25"):
+        mcp_client.validate_server_contract(
+            SimpleNamespace(protocolVersion="2025-06-18"),
+            [contract_tool()],
+        )
+
+
+def test_client_rejects_unexpected_tool_set() -> None:
+    with pytest.raises(McpClientError, match="exact allowlist"):
+        mcp_client.validate_server_contract(
+            SimpleNamespace(protocolVersion="2025-11-25"),
+            [contract_tool(), contract_tool(name="admin_export")],
+        )
+
+
+def test_client_rejects_allowlisted_tool_schema_drift() -> None:
+    drifted_input = {
+        **EXPECTED_INPUT_SCHEMA,
+        "properties": {
+            **EXPECTED_INPUT_SCHEMA["properties"],
+            "tenant_id": {"type": "string"},
+        },
+        "required": ["order_id", "tenant_id"],
+    }
+
+    with pytest.raises(McpClientError, match="schema hash"):
+        mcp_client.validate_server_contract(
+            SimpleNamespace(protocolVersion="2025-11-25"),
+            [contract_tool(input_schema=drifted_input)],
+        )
+
+
+@pytest.mark.parametrize(
+    "structured_result",
+    [
+        {"order_id": "O1001", "status": "shipped", "tenant_id": "tenant-1"},
+        {
+            "order_id": "O1001",
+            "status": "shipped",
+            "tenant_id": "tenant-1",
+            "requested_by": "mcp-user",
+            "secret": "must-not-pass",
+        },
+        {
+            "order_id": "O9999",
+            "status": "shipped",
+            "tenant_id": "tenant-1",
+            "requested_by": "mcp-user",
+        },
+    ],
+)
+def test_client_validates_structured_output_locally(
+    structured_result: dict[str, str],
+) -> None:
+    with pytest.raises(McpClientError, match="structured output"):
+        mcp_client.validate_order_status_result(
+            structured_result,
+            expected_order_id="O1001",
+        )
 
 
 @pytest.mark.asyncio

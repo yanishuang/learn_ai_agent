@@ -207,7 +207,7 @@ Streamable HTTP/remote MCP 把连接移到远程边界，需要 Authorization、
 
 ## 学员实验
 
-Task 11 将创建 `labs/chapter-10/`；该目录不在本次提交中。当前实验直接在参考实现完成：
+按 [Lab 10：MCP stdio 与信任治理](../labs/chapter-10/README.md) 完成当前实验：
 
 1. 运行 Server 和 Client 命令，保存成功 JSON。
 2. 调用未知订单，记录结构化错误和进程退出码。
@@ -248,7 +248,7 @@ cd reference-implementation
 uv run --group dev --extra live pytest -q
 ```
 
-自动断言覆盖工具发现、结构化结果、业务错误、total timeout、子进程回收、严格工具参数和可信权限。Authorization Server、consent UI、Streamable HTTP、schema Registry 和 Go 扩展尚未实现，必须作为 Advanced/Production 设计验收，不能声称由这些离线测试覆盖。
+自动断言覆盖协议协商 `2025-11-25`、精确工具 allowlist、输入/输出 schema hash、调用前 drift 拒绝、本地 structured output 校验、业务错误、total timeout、子进程回收、严格工具参数和可信权限。Authorization Server、consent UI、Streamable HTTP、外部 Registry 和 Go 扩展尚未实现，必须作为 Advanced/Production 设计验收，不能声称由这些离线测试覆盖。
 
 ## 作业与评分
 

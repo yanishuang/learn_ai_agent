@@ -2,7 +2,7 @@
 
 ## 目标
 
-验证本地 stdio server/client 的初始化、工具发现、结构化调用、业务错误、total timeout 和子进程清理。
+验证本地 stdio server/client 协商稳定协议 `2025-11-25`，工具集合精确匹配 allowlist，schema hash 无 drift，structured output 通过本地校验，并覆盖业务错误、total timeout 和子进程清理。
 
 ## 默认离线步骤
 
@@ -11,7 +11,7 @@ cd reference-implementation
 uv run python -m agent_course.mcp.client O1001 --timeout 5
 ```
 
-预期形状：一个 JSON object；`tool_names` 含 `query_order_status`，`structured_result` 含成功 code 与 tenant-scoped order output。不要匹配 SDK stderr 日志或进程 ID。
+预期形状：一个 JSON object；`protocol_version` 为 `2025-11-25`，`tool_names` 精确等于单工具 allowlist，`tool_schema_hashes` 含固定 SHA-256，`structured_result` 是通过本地严格模型的 tenant-scoped order output。不要匹配 SDK stderr 日志或进程 ID。
 
 ```bash
 cd reference-implementation
@@ -39,7 +39,7 @@ uv run --group dev --extra live pytest tests/test_mcp.py -q -k 'errors_and_clean
 ## 调试顺序
 
 1. 先确认 server 命令是当前 Python 的 `-m agent_course.mcp.server`。
-2. 检查 initialize/list_tools/call_tool 的顺序和 allowlist 工具名。
+2. 检查 initialize/list_tools/contract validation/call_tool 的顺序、协议版本和精确 allowlist。
 3. 区分 `isError`、缺 structured content、schema drift 与 transport timeout。
 4. 确认 timeout 覆盖完整 exchange，所有路径退出 context manager。
 5. 工具描述/结果按不可信数据处理，业务权限仍由 tool 后端执行。

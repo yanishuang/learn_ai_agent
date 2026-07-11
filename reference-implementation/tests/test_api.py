@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_course.agents.guardrails import DefaultGuardrail
@@ -15,9 +16,14 @@ from agent_course.core import (
     RunContext,
     ToolDefinition,
 )
-from agent_course.models.fake import ORDER_QUERY_FIXTURE, FakeModelGateway
+from agent_course.models.fake import (
+    INVALID_OUTPUT_FIXTURE,
+    ORDER_QUERY_FIXTURE,
+    TIMEOUT_FIXTURE,
+    FakeModelGateway,
+)
 from agent_course.observability.traces import InMemoryTraceSink
-from agent_course.tools.orders import QueryOrderStatusTool
+from agent_course.tools.orders import QueryOrderStatusArguments, QueryOrderStatusTool
 from agent_course.tools.registry import ToolRegistry
 
 
@@ -60,10 +66,14 @@ def make_context(
     )
 
 
-def make_course_application() -> CourseApplication:
+def make_course_application(
+    *,
+    model: object | None = None,
+    tool: QueryOrderStatusTool | None = None,
+) -> CourseApplication:
     runner = BoundedAgentRunner(
-        model=FakeModelGateway(),
-        tools=ToolRegistry([QueryOrderStatusTool()]),
+        model=model or FakeModelGateway(),
+        tools=ToolRegistry([tool or QueryOrderStatusTool()]),
         guardrail=DefaultGuardrail(),
         sessions=InMemorySessionStore(),
         traces=InMemoryTraceSink(),
@@ -157,6 +167,77 @@ def test_create_get_and_events_use_fake_model_and_trusted_context() -> None:
     assert events.json()["items"][-1]["data"]["stop_reason"] == "completed"
 
 
+@pytest.mark.parametrize(
+    ("question", "permissions", "expected_stop_reason"),
+    [
+        (TIMEOUT_FIXTURE, frozenset({"orders:read"}), "timeout"),
+        (INVALID_OUTPUT_FIXTURE, frozenset({"orders:read"}), "model_error"),
+        ("[fixture:blocked-high-risk]", frozenset({"orders:read"}), "policy_denied"),
+        (ORDER_QUERY_FIXTURE, frozenset(), "permission_denied"),
+    ],
+)
+def test_api_marks_typed_agent_failures_as_failed_runs(
+    question: str,
+    permissions: frozenset[str],
+    expected_stop_reason: str,
+) -> None:
+    application = make_course_application()
+    context = make_context().model_copy(update={"permissions": permissions})
+    with TestClient(
+        create_app(
+            course_application=application,
+            context_provider=lambda: context,
+        )
+    ) as client:
+        created = client.post("/v1/agent/runs", json={"question": question})
+        events = client.get(
+            f"/v1/agent/runs/{created.json()['run_id']}/events"
+        )
+
+    assert created.status_code == 201
+    assert created.json()["status"] == "failed"
+    assert created.json()["result"]["stop_reason"] == expected_stop_reason
+    assert events.json()["items"][-1] == {
+        "sequence": 3,
+        "type": "run.failed",
+        "data": {"stop_reason": expected_stop_reason},
+    }
+
+
+def test_api_marks_sanitized_handler_failure_as_failed_tool_error() -> None:
+    class ExplodingOrderTool(QueryOrderStatusTool):
+        async def _execute(
+            self,
+            arguments: QueryOrderStatusArguments,
+            context: RunContext,
+        ) -> object:
+            del arguments, context
+            raise RuntimeError("backend leaked sk-api-handler-secret")
+
+    application = make_course_application(tool=ExplodingOrderTool())
+    with TestClient(
+        create_app(
+            course_application=application,
+            context_provider=make_context,
+        )
+    ) as client:
+        created = client.post(
+            "/v1/agent/runs",
+            json={"question": ORDER_QUERY_FIXTURE},
+        )
+        events = client.get(
+            f"/v1/agent/runs/{created.json()['run_id']}/events"
+        )
+
+    payload = created.json()
+    assert payload["status"] == "failed"
+    assert payload["result"]["stop_reason"] == "tool_error"
+    assert payload["result"]["tool_results"][0]["code"] == "TOOL_ERROR"
+    assert payload["result"]["tool_results"][0]["error"] == "tool handler failed"
+    assert "sk-api-handler-secret" not in created.text
+    assert events.json()["items"][-1]["type"] == "run.failed"
+
+
 def test_request_body_cannot_supply_trusted_context() -> None:
     with make_client(make_context) as client:
         response = client.post(
@@ -222,6 +303,7 @@ def test_separate_clients_cannot_fetch_runs_or_share_sessions() -> None:
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             self.calls.append(messages)
             return ModelStep(content=f"answer-{len(self.calls)}")

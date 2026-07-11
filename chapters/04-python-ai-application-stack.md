@@ -19,6 +19,14 @@
 
 本章重点不是“哪个框架最强”，而是学会用 Python 工程方式组织 AI 应用。
 
+## 前置知识
+
+先完成第 2-3 章，能够运行 Fake Model、解释结构化输出合同，并把 Prompt、外部上下文与应用强制策略分开。Go 和任何 Agent 框架都不是前置条件。
+
+## 核心知识
+
+本章核心知识由 4.2-4.11 节组成：以 `ModelGateway` 和可信 `RunContext` 为稳定内核，再按 API、Service、Tool、Repository、Trace 的依赖方向选择最少框架层。
+
 ![Agent 框架与互操作生态](../assets/agent-ecosystem-illustrations/03-agent-interop.png)
 
 ## 4.2 Python AI 生态里的核心选择
@@ -49,6 +57,7 @@ class ModelGateway(Protocol):
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep: ...
 
 
@@ -355,7 +364,17 @@ async def explain_with_agent(concept: str) -> str:
 3. 是否真的遇到性能、部署或团队维护问题。
 4. Go 化后是否减少复杂度，而不是增加双栈成本。
 
-## 4.12 本章完整实践任务
+## 教师演示
+
+1. 展示 `ModelGateway.next_step()` 的 provider-neutral 签名，以及 runner 如何在每一轮传入剩余 `max_output_tokens`。
+2. 用同一问题切换 Fake adapter 与被三重门禁锁住的 OpenAI adapter，证明业务层不读取 Key。
+3. 从认证请求构造 `RunContext`，展示模型 arguments 无法覆盖 tenant/user/permissions。
+4. 对比低层 Responses-owned loop 与 Agents SDK-owned run，说明两者的状态和预算责任不同。
+5. 打开生态成熟度矩阵，只按当前任务需要选择最少层，不复制易过期的框架排名。
+
+## 学员实验
+
+本章实验直接复用参考实现的 core/model/live-gate 文件，不新增平行脚手架。任务 1 和任务 3 属于 Core；任务 2 的真实 SDK run 属于显式 Live 的 Advanced 扩展。
 
 ### 任务 1：ModelGateway 概念解释服务
 
@@ -414,6 +433,40 @@ async def explain_with_agent(concept: str) -> str:
 ## 我的结论
 ```
 
+## 失败注入与排错
+
+| 注入 | 预期 | 首查边界 |
+| --- | --- | --- |
+| Service 直接 import OpenAI client | 架构评审失败 | 依赖是否只指向 `ModelGateway` |
+| 模型 arguments 加 tenant/user | strict validation 失败 | `RunContext` 是否来自认证层 |
+| Live 缺 flag/key/model | 构造前失败 | `load_live_settings()` |
+| 第二轮重复完整历史和 continuation | contract test 失败 | delta messages 与 caller-owned state |
+| 框架比较与成熟度文档冲突 | 文档验证失败 | 单一成熟度来源与验证日期 |
+
+## 自动验证
+
+```bash
+cd reference-implementation
+uv run --frozen --no-sync --group dev --extra live pytest \
+  tests/test_core.py tests/test_fake_model.py tests/test_live_gates.py \
+  tests/test_import_isolation.py -q
+uv run --frozen --no-sync --group dev --extra live ruff check .
+```
+
+默认命令不发起模型请求。学习者还要提交一张依赖方向图和一份框架选择记录，说明哪些判断来自稳定应用合同，哪些来自有日期的成熟度矩阵。
+
+## 作业与评分
+
+| 评分项 | 分值 | 满分证据 |
+| --- | ---: | --- |
+| ModelGateway 边界 | 25 | 签名、Fake/Live compatibility、remaining-token 证据 |
+| RunContext 与依赖方向 | 25 | trusted identity、tenant 隔离、无 provider 泄漏 |
+| Pydantic 边界 | 15 | DTO/strict schema/错误分类 |
+| 框架选择记录 | 20 | 最小层、成熟度来源、重新评估触发条件 |
+| 自动验证与复盘 | 15 | focused tests、Ruff、一次失败分析 |
+
+总分 100 分。Core 及格线为 70 分；若模型可提供身份、默认路径需要网络，或业务层绕过 `ModelGateway`，本章不及格。
+
 ## 4.13 本章自测题
 
 ### 概念题
@@ -438,17 +491,13 @@ async def explain_with_agent(concept: str) -> str:
 3. 对。  
 4. 对。  
 
-## 4.14 本章完成标准
+## Core / Advanced / Production 完成标准
 
-完成本章后，你应该能做到：
-
-- 能用 OpenAI SDK 完成一个问答接口。
-- 能用 Pydantic 定义输入输出。
-- 能用 OpenAI Agents SDK 完成一个简单 Agent。
-- 能用 `ModelGateway` 和 `RunContext` 保持业务架构独立于 provider / framework。
-- 能按选择规则说明 Python AI 框架的适用边界，并把易变比较留在成熟度文档。
-- 能说明 Python 主线和 Go 扩展的合理分工。
-- 能说明后续做 Tool Calling 和 RAG 时各框架如何扩展。
+| 等级 | 完成标准 |
+| --- | --- |
+| Core | 默认 Fake 与 import-isolation tests 通过；Service 只依赖 `ModelGateway`；身份只来自 `RunContext`；能用 Pydantic 定义边界并解释框架选择。 |
+| Advanced | 在三重门禁下比较 Responses-owned loop 与 SDK-owned run，记录模型、预算和脱敏结果；可替换一个 adapter 而不改业务合同。 |
+| Production | 实现依赖注入、secret/workload identity、配置验证、provider failover 策略、usage/SLO、trace、发布门禁和 adapter contract tests；Go 只承接有证据的稳定边界。 |
 
 ## 4.15 本章学习资料
 

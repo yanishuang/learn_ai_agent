@@ -1,7 +1,7 @@
 # 第 7 章：RAG 核心：从文档到可信答案
 
 更新时间：2026-07-10
-建议学习时间：7-10 天  
+建议学习时间：7-10 天
 本章产出：一个确定性、权限感知、能拒答并返回真实引用的离线 RAG；以及一份可迁移到 PostgreSQL/pgvector 的版本化数据与授权查询设计。
 
 ## 本章定位
@@ -339,7 +339,7 @@ uploaded -> parsing -> chunking -> embedding -> indexed
 | refusal correctness | 无授权答案或相关性不足时是否拒答 |
 | answer grounding | 最终文本是否来自 top hit 并匹配 citation |
 
-Task 11 计划创建 `evals/rag-cases.jsonl`，覆盖 answerable、unanswerable、synonym、citation 和 tenant isolation。该数据集在本次 Task 5 提交中尚未创建；当前可执行证据来自 `tests/test_rag.py`。
+[RAG baseline 数据集](../evals/rag-cases.jsonl) 已覆盖 answerable、unanswerable、synonym、citation 和 tenant isolation，并由 `evals/run_baseline.py` 与 `tests/test_course_datasets.py` 离线执行；focused 行为证据来自 `tests/test_rag.py`。
 
 ## 教师演示
 
@@ -351,7 +351,7 @@ Task 11 计划创建 `evals/rag-cases.jsonl`，覆盖 answerable、unanswerable�
 
 ## 学员实验
 
-Task 11 计划创建本章实验目录 `labs/chapter-07/`；该目录在本次 Task 5 提交中尚未创建，因此不提供失效链接，也不宣称其 README 当前可运行。
+按 [Lab 07：权限感知 RAG](../labs/chapter-07/README.md) 完成本章实验，保存授权过滤、真实 quote、稳定排名和拒答证据。
 
 实验任务：
 
@@ -399,7 +399,7 @@ uv run --group dev --extra live pytest tests/test_rag.py -q
 - 无答案和误导性单词重合都会拒答；
 - 答案来自 top hit，citation quote 是 content 子串。
 
-本章文档验收还应确认：八个指定元数据字段全部出现；ACL 只由文档表提供且 query 不信任 chunk ACL；普通查询只读当前发布版本，显式 replay 才能读保留旧向量；SQL 同时含 tenant 和 user access 条件；HNSW/IVFFlat 被描述为权衡；生产 schema 明确标记为设计练习；Python fence 可解析；计划 lab 路径没有写成当前失效链接。
+本章文档验收还应确认：八个指定元数据字段全部出现；ACL 只由文档表提供且 query 不信任 chunk ACL；普通查询只读当前发布版本，显式 replay 才能读保留旧向量；SQL 同时含 tenant 和 user access 条件；HNSW/IVFFlat 被描述为权衡；生产 schema 明确标记为设计练习；Python fence 可解析；Lab 07 与 RAG baseline 链接可验证。
 
 ## 作业与评分
 

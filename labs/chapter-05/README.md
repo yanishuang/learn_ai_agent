@@ -11,7 +11,7 @@ cd reference-implementation
 uv run --group dev --extra live pytest tests/test_tools.py -q
 ```
 
-预期形状：`10 passed`；覆盖严格 schema、可信 identity、permission、unknown tool 和 trace redaction。
+预期形状：全部通过；覆盖严格 schema、可信 identity、permission、unknown tool、handler exception sanitization 和 trace redaction。
 
 ```bash
 cd reference-implementation
@@ -46,7 +46,7 @@ uv run --group dev --extra live pytest tests/test_tools.py -q -k 'missing_permis
 
 1. 打印 `ToolDefinition.input_schema`，确认 `additionalProperties=false` 且 required 只有 `order_id`。
 2. 检查 context 是平台注入，不由模型 JSON 合并。
-3. 区分 unknown tool、invalid arguments、permission denied 和业务 not found。
+3. 区分 unknown tool、invalid arguments、permission denied、业务 not found 和 sanitized `TOOL_ERROR`。
 4. 只在幂等边界内重试；权限/校验错误不重试。
 
 ## 默认验证

@@ -143,6 +143,34 @@ async def test_registry_returns_structured_unknown_tool_error(
     )
 
 
+@pytest.mark.asyncio
+async def test_tool_handler_exception_becomes_sanitized_structured_result(
+    context: RunContext,
+) -> None:
+    class ExplodingOrderTool(QueryOrderStatusTool):
+        async def _execute(
+            self,
+            arguments: QueryOrderStatusArguments,
+            context: RunContext,
+        ) -> ToolResult:
+            del arguments, context
+            raise RuntimeError("database failed with sk-handler-secret")
+
+    result = await ToolRegistry([ExplodingOrderTool()]).execute(
+        "query_order_status",
+        {"order_id": "O1001"},
+        context,
+    )
+
+    assert result == ToolResult(
+        name="query_order_status",
+        code="TOOL_ERROR",
+        success=False,
+        error="tool handler failed",
+    )
+    assert "sk-handler-secret" not in result.model_dump_json()
+
+
 def test_registry_exposes_strict_tool_definition() -> None:
     definitions = ToolRegistry([QueryOrderStatusTool()]).definitions()
 

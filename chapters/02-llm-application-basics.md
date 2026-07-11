@@ -3,7 +3,7 @@
 更新时间：2026-07-10
 建议学习时间：3-5 天  
 适合阶段：已经理解 AI Agent 全景，准备开始动手调用大模型  
-本章产出：一个 FastAPI 大模型问答 API、一个结构化输出接口、一个 SSE 流式响应接口、一份调用日志与错误处理清单
+本章 Core 产出：一个确定性 Fake Model 调用证据、一份 provider-neutral 合同检查、一组原生结构化输出与 Live 门禁测试，以及一份 API / SSE 设计评审记录
 
 ## 2.1 本章学习目标
 
@@ -12,10 +12,10 @@
 1. 解释大模型应用的一次完整调用链路。
 2. 区分 system、user、assistant、tool 消息的职责。
 3. 理解 temperature、top_p、max tokens、上下文窗口、流式输出的作用。
-4. 使用 Python + OpenAI SDK / Responses API 完成一次基础模型调用。
-5. 使用 Pydantic 校验模型结构化输出。
-6. 使用 FastAPI + SSE 把模型输出实时推送给前端。
-7. 为模型调用增加基础错误处理、超时、日志和成本意识。
+4. 使用 provider-neutral `ModelGateway` 和 Fake Model 完成确定性基础调用。
+5. 解释并测试 Responses 原生结构化输出与 Pydantic 校验边界。
+6. 评审 FastAPI + SSE 的 JSON framing、断连和取消设计；实现接口属于 Advanced。
+7. 为模型调用设计基础错误处理、超时、日志和成本字段。
 8. 知道哪些参数和输出不能盲目信任。
 
 本章不是 Agent，也不是 RAG。它只解决一个基础问题：如何把大模型稳定接入到后端应用里。
@@ -36,6 +36,10 @@
 ```
 
 不要一开始就做工具调用或 RAG。先把最基础的模型调用做稳定，后面章节才有地基。
+
+## 核心知识
+
+本章核心知识由 2.3-2.12 节组成。Core 关注可离线验证的模型合同、结构化输出和 Live 门禁；普通问答 API 与 SSE 代码用于教师演示和设计评审，不作为当前 Lab 02 已实现的接口承诺。
 
 ## 2.3 大模型应用的一次完整调用链路
 
@@ -184,7 +188,7 @@ def load_live_settings() -> LiveSettings:
 实验才加载 Live adapter。Live 模式没有默认模型，`OPENAI_MODEL` 必须由操作者明确
 选择。
 
-## 2.7 实践一：普通问答 API
+## 2.7 教师演示：普通问答 API 设计
 
 ### 默认离线启动：先运行参考实现
 
@@ -346,7 +350,7 @@ curl -X POST http://127.0.0.1:8000/api/ai/chat \
 能得到中文回答，即完成 Live 对比实验。日常学习、自动测试和首次启动仍使用上一节的
 `FakeModelGateway` 离线路径。
 
-## 2.8 实践二：结构化输出
+## 2.8 教师演示：结构化输出
 
 ### 为什么需要结构化输出
 
@@ -458,7 +462,7 @@ async def structured_endpoint(request: ChatRequest) -> LessonAnswer:
 如果结构化结果缺失或校验失败，后端必须报错或按受控策略重试，不能把脏数据继续传给
 业务流程。
 
-## 2.9 实践三：SSE 流式响应
+## 2.9 教师演示：SSE 流式响应设计
 
 ### 为什么需要流式输出
 
@@ -622,7 +626,11 @@ SSE 的每个 `data:` 都是合法 JSON，文本中的换行符会被 JSON 转�
 - 引用来源必须来自后端检索结果。
 - 高风险动作不能只靠模型一句话触发。
 
-## 2.13 本章完整实践任务
+## 学员实验
+
+Core 实验使用已存在的 [Lab 02](../labs/chapter-02/README.md)。学习者运行 Fake、provider contract、Live gate 和原生结构化输出测试，并提交确定性输出 shape、失败分类和门禁证据。当前参考实现**不提供** `/api/ai/chat`、`/api/ai/structured` 或 `/api/ai/stream`，因此 Lab 02 不把这些端点列为 Core 验收。
+
+下面四项是 Advanced 实现扩展。选择扩展的学习者必须先写对应 API / SSE 自动测试，再声称接口完成；只阅读示例代码不算交付。
 
 ### 任务 1：基础问答接口
 
@@ -683,6 +691,42 @@ SSE 的每个 `data:` 都是合法 JSON，文本中的换行符会被 JSON 转�
 - 能根据 `request_id` 找到一次请求的完整日志。
 - 日志里没有 API Key 和敏感输入全文。
 
+## 失败注入与排错
+
+| 注入 | Core 预期 | 排错重点 |
+| --- | --- | --- |
+| 输入不等于精确 Fake fixture | 返回固定 fallback，而不是随机结果 | fixture 文本和消息角色 |
+| `[fixture:timeout]` | 类型化 timeout，默认不联网重试 | gateway 异常分类 |
+| `[fixture:invalid-output]` | `model_error`，不伪装成完成 | runner stop reason |
+| 缺少 Live flag/key/model | 请求前 `LiveConfigurationError` | 三重环境门禁，不打印值 |
+| Responses `incomplete` / content filter | 类型化非成功 stop reason | `status`、`incomplete_details`、`error.code` |
+| SSE 设计遗漏断连 | Advanced 设计评审失败 | JSON framing、取消传播、上游关闭 |
+
+## 自动验证
+
+从仓库根目录运行 Lab 02 的默认离线验收：
+
+```bash
+cd reference-implementation
+uv run --frozen --no-sync --group dev --extra live pytest \
+  tests/test_core.py tests/test_fake_model.py tests/test_live_gates.py -q \
+  -k 'not successful_live_gate_construction'
+```
+
+该命令验证 provider-neutral 合同、精确 Fake 行为、Live 门禁、Responses 原生 Pydantic parse、strict schema、每轮剩余输出 token 和终态分类。它不声称验证尚未实现的 FastAPI/SSE 端点。
+
+## 作业与评分
+
+| 评分项 | 分值 | 满分证据 |
+| --- | ---: | --- |
+| Fake 与消息合同 | 25 | 精确 fixture、固定输出 shape、无网络证据 |
+| 结构化输出与 Live 门禁 | 25 | parse/gate focused tests 与失败解释 |
+| 状态、预算与错误分类 | 20 | remaining token、incomplete/filter/model failure 证据 |
+| API / SSE 设计评审 | 20 | DTO、JSON event、断连/取消、日志字段；不冒充已实现 |
+| 复盘与安全边界 | 10 | 密钥、敏感输入、输出不可信和成本边界 |
+
+总分 100 分。Core 及格线为 70 分，且 Live 门禁、结构化校验和“未实现端点不冒充完成”三项为硬门槛。
+
 ## 2.14 本章自测题
 
 ### 概念题
@@ -706,16 +750,13 @@ SSE 的每个 `data:` 都是合法 JSON，文本中的换行符会被 JSON 转�
 3. 对。  
 4. 对。  
 
-## 2.15 本章完成标准
+## Core / Advanced / Production 完成标准
 
-完成本章后，你应该能做到：
-
-- 能启动一个 FastAPI AI 服务。
-- 能完成普通问答调用。
-- 能用 Pydantic 校验结构化输出。
-- 能实现一个 SSE 流式响应接口。
-- 能说明调用日志应该记录哪些字段。
-- 能说清楚 API Key、输入、输出的安全边界。
+| 等级 | 完成标准 |
+| --- | --- |
+| Core | Lab 02 默认离线命令通过；能解释消息、provider 合同、结构化输出、Live 门禁、类型化 stop reason 和 API/SSE 设计边界；不声称三个示例端点已经存在。 |
+| Advanced | 自行实现普通问答、原生结构化输出和 SSE 端点，并新增 API contract、JSON framing、断连、取消和非法输出测试；Live 仍显式付费启用。 |
+| Production | 在 Advanced 基础上实现认证身份、限流、总 deadline、取消传播、usage/cost、脱敏日志、SLO、告警、保留策略和发布回归门禁。 |
 
 ## 2.16 本章学习资料
 

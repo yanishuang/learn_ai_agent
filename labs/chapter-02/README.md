@@ -2,7 +2,9 @@
 
 ## 目标
 
-验证精确 Fake fixture、确定性直接回答、可分类模型失败，以及 Live adapter 在缺少配置时请求前拒绝。
+验证精确 Fake fixture、provider-neutral 模型合同、确定性直接回答、原生结构化输出、Responses 剩余 token/终态分类，以及 Live adapter 在缺少配置时请求前拒绝。
+
+本 Lab 的 Core 交付不包含 `/api/ai/chat`、`/api/ai/structured` 或 SSE 端点。Chapter 2 中这些代码是教师演示与 Advanced 扩展；只有学习者另写 API、framing、断连和取消测试后，才能把它们作为已实现交付。
 
 ## 默认离线步骤
 
@@ -55,7 +57,7 @@ cd reference-implementation
 uv run --group dev --extra live pytest tests/test_core.py tests/test_fake_model.py tests/test_live_gates.py -q -k 'not successful_live_gate_construction'
 ```
 
-预期形状：选中的 core/Fake/gate tests 全部通过，退出码 0。
+预期形状：选中的 core/Fake/gate/structured-output/budget/status tests 全部通过，退出码 0；不启动 Web Server，也不声称验证未实现端点。
 
 ## 可选 Live 扩展（显式付费）
 

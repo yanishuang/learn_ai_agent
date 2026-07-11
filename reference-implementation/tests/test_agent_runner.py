@@ -170,6 +170,7 @@ async def test_runner_stops_at_max_turns() -> None:
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             self.turn += 1
             return ModelStep(
@@ -203,6 +204,7 @@ async def test_runner_enforces_asyncio_timeout() -> None:
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             await asyncio.sleep(1)
             return ModelStep(content="too late")
@@ -244,6 +246,7 @@ async def test_validation_failure_is_terminal_without_retry() -> None:
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             self.calls += 1
             return ModelStep(
@@ -274,6 +277,7 @@ async def test_runner_stops_before_exceeding_tool_call_budget() -> None:
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             return ModelStep(
                 tool_calls=(
@@ -334,6 +338,7 @@ async def test_provider_continuation_receives_only_new_tool_results() -> None:
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             self.calls.append((messages, continuation))
             if len(self.calls) == 1:
@@ -383,6 +388,7 @@ async def test_session_history_continues_for_same_trusted_identity() -> None:
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             self.calls.append(messages)
             return ModelStep(content=f"answer-{len(self.calls)}")
@@ -455,6 +461,7 @@ async def test_equal_session_ids_do_not_cross_tenant_or_user_boundaries(
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             self.calls.append(messages)
             return ModelStep(content="ok")
@@ -505,6 +512,7 @@ async def test_output_token_budget_rejects_content_before_returning_or_persistin
             tools: list[ToolDefinition],
             *,
             continuation: ModelContinuation | None = None,
+            max_output_tokens: int | None = None,
         ) -> ModelStep:
             return ModelStep(
                 content="too expensive",

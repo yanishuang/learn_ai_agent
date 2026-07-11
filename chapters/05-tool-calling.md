@@ -24,6 +24,14 @@
 
 Tool Calling 是 Agent 的基础。没有工具，Agent 只能说；有了工具，Agent 才能查、算、读、写、执行。
 
+## 前置知识
+
+先完成第 2-4 章，能够运行 Fake Model、使用 Pydantic strict model，并理解 `ModelGateway`、`RunContext` 和后端权限边界。无需 Live 模型或 Go。
+
+## 核心知识
+
+本章核心知识由 5.2-5.19 节组成：模型只提出类型化调用，应用负责 allowlist、参数校验、可信身份、授权、effect class、幂等、审批、执行、结构化错误与审计。
+
 ## 5.2 什么是 Tool Calling
 
 Tool Calling 是让模型在需要外部能力时，输出一个“工具调用请求”，由应用程序执行工具，再把工具结果返回给模型。
@@ -833,7 +841,17 @@ Python 普通函数
   -> Go MCP Server 或 Go 工具微服务
 ```
 
-## 5.20 本章完整实践任务
+## 教师演示
+
+1. 打印 `QueryOrderStatusTool.definition`，确认模型只看到 `order_id` 且禁止额外字段。
+2. 用可信 `RunContext` 分别执行成功、缺权限、跨 tenant 参数注入和业务 not-found case。
+3. 让 handler 抛出含敏感值的异常，展示边界只返回 `TOOL_ERROR` 与通用错误文本。
+4. 运行两轮 Fake tool loop，区分模型调用证据、后端执行结果和最终回答。
+5. 对 write/irreversible 示例演示 payload hash、幂等键和人工审批为何必须由服务端持有。
+
+## 学员实验
+
+Core 实验按 [Lab 05](../labs/chapter-05/README.md) 完成严格工具、可信 context、结构化失败和 runner 集成。天气、知识库搜索、多工具路由与真实 Live tool selection 是 Advanced 扩展，必须另写确定性合同测试。
 
 ### 任务 1：天气查询工具
 
@@ -968,6 +986,39 @@ Python 普通函数
 - 创建退款。
 - 修改权限。
 
+## 失败注入与排错
+
+| 注入 | 预期 | 禁止做法 |
+| --- | --- | --- |
+| arguments 加 tenant/user/secret | `INVALID_ARGUMENTS`，handler 不执行 | 从模型 JSON 合并身份 |
+| 删除 `orders:read` | `PERMISSION_DENIED`，不重试 | 让模型“换种说法”绕过 |
+| handler 抛异常 | `TOOL_ERROR`，原始异常不进入结果 | 把 exception message 放进模型上下文 |
+| 未注册工具 | `UNKNOWN_TOOL`，无副作用 | 动态 import 任意名称 |
+| 重复同名同参数调用 | runner 在第二次执行前停止 | 只按 call ID 去重 |
+| write payload 审批后变化 | hash mismatch，要求重新审批 | 复用旧批准 |
+
+## 自动验证
+
+```bash
+cd reference-implementation
+uv run --frozen --no-sync --group dev --extra live pytest \
+  tests/test_tools.py tests/test_agent_runner.py -q
+```
+
+验收必须同时检查工具 schema、模型实际 arguments、handler execution count、`ToolResult.code`、stop reason 和脱敏 trace；不能从最终文本反推调用正确。
+
+## 作业与评分
+
+| 评分项 | 分值 | 满分证据 |
+| --- | ---: | --- |
+| strict schema 与参数准确率 | 20 | 精确 arguments、额外字段拒绝、模型调用证据 |
+| trusted context 与权限 | 25 | tenant/user 不可覆盖、permission/backend ACL tests |
+| 结构化结果与失败 | 20 | success/not-found/permission/handler exception 分类 |
+| effect、幂等与审批 | 20 | read/write/irreversible 分类、hash 与 retry policy |
+| trace、评估与复盘 | 15 | selection/argument 指标、脱敏、失败分析 |
+
+总分 100 分。Core 及格线为 70 分；任一身份注入、越权成功副作用、原始 handler 异常泄漏或高风险动作无审批都会直接不及格。
+
 ## 5.21 本章自测题
 
 ### 概念题
@@ -999,20 +1050,13 @@ Python 普通函数
 5. 错。  
 6. 错。
 
-## 5.22 本章完成标准
+## Core / Advanced / Production 完成标准
 
-完成本章后，你应该能做到：
-
-- 能解释 Tool Calling 的执行流程。
-- 能设计清晰的工具名称、描述、参数和返回值。
-- 能用 Python 实现至少 3 个工具。
-- 能用 Pydantic 校验工具参数。
-- 能做用户权限校验。
-- 能记录工具调用日志。
-- 能识别危险工具并设计人工确认。
-- 能按 effect class 设计幂等、审批和重试策略。
-- 能防范 tool poisoning，并分别评估工具选择与参数准确率。
-- 能说清楚哪些工具未来适合抽到 Go 或 MCP Server。
+| 等级 | 完成标准 |
+| --- | --- |
+| Core | Lab 05 与 runner focused tests 通过；一个严格订单工具从可信 context 授权；所有失败结构化；handler exception 脱敏；能分别评分工具序列和参数。 |
+| Advanced | 增加至少两个有真实需求的工具、多工具 trajectory cases、tool-output injection 测试，以及一个带 payload hash 和幂等键的审批设计。 |
+| Production | 实现 authoritative resource ACL、持久幂等/审批记录、retry/reconciliation、rate limit、审计、schema/version registry、kill switch、SLO 和事故回放；稳定服务才考虑 Go/MCP。 |
 
 ## 5.23 本章学习资料
 

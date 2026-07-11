@@ -352,3 +352,62 @@ def test_ecosystem_matrix_reports_physical_line_after_fenced_decoy(
     assert validate_repository(tmp_path) == [
         "docs/ecosystem-maturity.md:9: invalid maturity label Unknown"
     ]
+
+
+def _write_manifested_chapter(tmp_path: Path, content: str) -> None:
+    chapters = tmp_path / "chapters"
+    chapters.mkdir()
+    (chapters / "01.md").write_text(content, encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "course-manifest.json").write_text(
+        '[{"path": "chapters/01.md", "title": "Chapter"}]\n',
+        encoding="utf-8",
+    )
+
+
+def test_manifested_chapter_requires_every_teaching_contract_section(
+    tmp_path: Path,
+) -> None:
+    _write_manifested_chapter(tmp_path, "# Chapter\n")
+
+    assert validate_repository(tmp_path) == sorted(
+        [
+            "chapters/01.md: missing teaching section prerequisites",
+            "chapters/01.md: missing teaching section learning outcomes",
+            "chapters/01.md: missing teaching section core knowledge",
+            "chapters/01.md: missing teaching section instructor demonstration",
+            "chapters/01.md: missing teaching section learner lab",
+            "chapters/01.md: missing teaching section failure injection",
+            "chapters/01.md: missing teaching section automated verification",
+            "chapters/01.md: missing teaching section assignment and rubric",
+            "chapters/01.md: missing teaching section completion levels",
+            "chapters/01.md: missing teaching section current sources",
+            "chapters/01.md: missing teaching section recap",
+        ]
+    )
+
+
+def test_assignment_must_be_scored_and_completion_levels_must_be_distinct(
+    tmp_path: Path,
+) -> None:
+    _write_manifested_chapter(
+        tmp_path,
+        "# Chapter\n"
+        "## 前置知识\nready\n"
+        "## 学习目标\noutcomes\n"
+        "## 核心知识\nconcepts\n"
+        "## 教师演示\ndemo\n"
+        "## 学员实验\nlab\n"
+        "## 失败注入与排错\nfailure\n"
+        "## 自动验证\nchecks\n"
+        "## 作业与评分\nsubmit evidence\n"
+        "## Core / Advanced / Production 完成标准\nCore only\n"
+        "## 本章资料\nsources\n"
+        "## 复盘模板\nrecap\n",
+    )
+
+    assert validate_repository(tmp_path) == [
+        "chapters/01.md: assignment must include explicit scoring",
+        "chapters/01.md: completion standards must distinguish Core, Advanced, and Production",
+    ]

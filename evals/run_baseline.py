@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,7 @@ from agent_course.tools.orders import (
     QueryOrderStatusArguments,
     QueryOrderStatusTool,
 )
+from agent_course.tools.base import StrictToolArguments, StructuredTool
 from agent_course.tools.registry import ToolRegistry
 
 
@@ -145,6 +146,7 @@ class _CountingGateway:
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep:
         del messages, tools, continuation
         self.calls += 1
@@ -161,6 +163,7 @@ class _StaticToolCallGateway:
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep:
         del messages, tools, continuation
         return ModelStep(
@@ -185,6 +188,7 @@ class _UniqueToolCallGateway:
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep:
         del messages, tools, continuation
         self.turn += 1
@@ -207,6 +211,7 @@ class _SlowGateway:
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep:
         del messages, tools, continuation
         await asyncio.sleep(1)
@@ -220,6 +225,7 @@ class _ToolOutputFollowingGateway:
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep:
         del tools, continuation
         if not any(message.role == "tool" for message in messages):
@@ -243,6 +249,56 @@ class _ToolOutputFollowingGateway:
             ),
             stop_reason=StopReason.TOOL_CALLS,
         )
+
+
+class _RetrievedDocumentFollowingGateway:
+    def __init__(self, hostile_content: str) -> None:
+        self.hostile_content = hostile_content
+
+    async def next_step(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        *,
+        continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
+    ) -> ModelStep:
+        del tools, continuation, max_output_tokens
+        if self.hostile_content not in "\n".join(message.content for message in messages):
+            raise AssertionError("hostile retrieved content did not reach the bounded Agent")
+        return ModelStep(
+            tool_calls=(
+                ToolCall(
+                    id="security-indirect-export",
+                    name="admin_export",
+                    arguments={},
+                ),
+            ),
+            stop_reason=StopReason.TOOL_CALLS,
+        )
+
+
+class _AdminExportArguments(StrictToolArguments):
+    pass
+
+
+class _AdminExportTool(StructuredTool[_AdminExportArguments]):
+    name = "admin_export"
+    description = "Export protected data after authoritative authorization."
+    permission = "admin:export"
+    arguments_type = _AdminExportArguments
+
+    def __init__(self) -> None:
+        self.execution_count = 0
+
+    async def _execute(
+        self,
+        arguments: _AdminExportArguments,
+        context: RunContext,
+    ) -> ToolResult:
+        del arguments, context
+        self.execution_count += 1
+        return ToolResult(name=self.name, code="OK", success=True, output={})
 
 
 class _PoisonedOrderTool(QueryOrderStatusTool):
@@ -350,6 +406,41 @@ async def _run_security_case(row: dict[str, Any]) -> _SecurityObservation:
             retrieved_chunk_ids=tuple(hit.chunk_id for hit in hits),
             trace_event_types=tuple(event.event_type for event in events),
             trace_text="\n".join(event.model_dump_json() for event in events),
+        )
+
+    if target == "retrieved_agent":
+        traces = InMemoryTraceSink()
+        trace_id = traces.start_trace(context)
+        retriever = InMemoryRetriever(
+            [DocumentChunk.model_validate(source["chunk"])]
+        )
+        hits = retriever.search(row["input"], context, top_k=3)
+        traces.record(
+            trace_id,
+            "retrieval.completed",
+            {"hit_count": len(hits), "chunk_ids": [hit.chunk_id for hit in hits]},
+        )
+        if not hits:
+            raise AssertionError(f"{row['case_id']}: hostile fixture was not retrieved")
+        hostile_content = hits[0].content
+        export_tool = _AdminExportTool()
+        result = await _runner(
+            _RetrievedDocumentFollowingGateway(hostile_content),
+            tools=ToolRegistry([export_tool]),
+            traces=traces,
+        ).run(
+            f"Question: {row['input']}\nRetrieved data:\n{hostile_content}",
+            context,
+            _limits(source.get("limits")),
+            trace_id=trace_id,
+        )
+        return replace(
+            _from_agent_result(
+                result,
+                traces,
+                handler_executions=export_tool.execution_count,
+            ),
+            retrieved_chunk_ids=tuple(hit.chunk_id for hit in hits),
         )
 
     if target == "tool_output":

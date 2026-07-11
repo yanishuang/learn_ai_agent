@@ -69,8 +69,9 @@ class BoundedAgentRunner:
         limits: RunLimits,
         *,
         session_id: str | None = None,
+        trace_id: str | None = None,
     ) -> AgentResult:
-        trace_id = self.traces.start_trace(context)
+        trace_id = trace_id or self.traces.start_trace(context)
         decision = self.guardrail.check_input(question, context)
         self.traces.record(
             trace_id,
@@ -128,11 +129,15 @@ class BoundedAgentRunner:
     ) -> StopReason:
         model_input = list(state.messages)
         for turn in range(1, limits.max_turns + 1):
+            remaining_output_tokens = limits.max_output_tokens - state.output_tokens
+            if remaining_output_tokens <= 0:
+                return StopReason.MAX_OUTPUT_TOKENS
             state.model_turn_count += 1
             step = await self.model.next_step(
                 model_input,
                 self.tools.definitions(),
                 continuation=state.continuation,
+                max_output_tokens=remaining_output_tokens,
             )
             state.continuation = step.continuation
             state.model_tool_calls.extend(
@@ -238,6 +243,8 @@ class BoundedAgentRunner:
             return StopReason.PERMISSION_DENIED
         if result.code == "POLICY_DENIED":
             return StopReason.POLICY_DENIED
+        if result.code == "TOOL_ERROR":
+            return StopReason.TOOL_ERROR
         return StopReason.MODEL_ERROR
 
     def _finish(

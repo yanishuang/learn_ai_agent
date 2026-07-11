@@ -130,6 +130,7 @@ async def test_evaluate_cases_covers_success_tool_accuracy_security_and_turns() 
             context=make_context(),
             limits=make_limits(),
             expected_answer_contains=("bounded",),
+            expected_tool_calls=(),
             max_turns=1,
         ),
         EvalCase(
@@ -138,8 +139,12 @@ async def test_evaluate_cases_covers_success_tool_accuracy_security_and_turns() 
             context=make_context(permissions=frozenset({"orders:read"})),
             limits=make_limits(),
             expected_answer_contains=("shipped",),
-            expected_tool_name="query_order_status",
-            expected_tool_arguments={"order_id": "O1001"},
+            expected_tool_calls=(
+                {
+                    "name": "query_order_status",
+                    "arguments": {"order_id": "O1001"},
+                },
+            ),
             max_turns=2,
         ),
         EvalCase(
@@ -147,6 +152,12 @@ async def test_evaluate_cases_covers_success_tool_accuracy_security_and_turns() 
             question="unauthorized",
             context=make_context(),
             limits=make_limits(),
+            expected_tool_calls=(
+                {
+                    "name": "query_order_status",
+                    "arguments": {"order_id": "O1001"},
+                },
+            ),
             expected_stop_reason=StopReason.PERMISSION_DENIED,
             expect_unauthorized_action_blocked=True,
             max_turns=1,
@@ -196,8 +207,9 @@ async def test_eval_report_detects_wrong_tool_arguments_and_excess_turns() -> No
         question="bad",
         context=make_context(),
         limits=make_limits(),
-        expected_tool_name="query_order_status",
-        expected_tool_arguments={"order_id": "O1001"},
+        expected_tool_calls=(
+            {"name": "query_order_status", "arguments": {"order_id": "O1001"}},
+        ),
         max_turns=1,
     )
 
@@ -237,8 +249,9 @@ async def test_eval_argument_accuracy_rejects_unexpected_arguments() -> None:
         question="extra-arguments",
         context=make_context(),
         limits=make_limits(),
-        expected_tool_name="query_order_status",
-        expected_tool_arguments={"order_id": "O1001"},
+        expected_tool_calls=(
+            {"name": "query_order_status", "arguments": {"order_id": "O1001"}},
+        ),
         max_turns=1,
     )
 
@@ -249,6 +262,73 @@ async def test_eval_argument_accuracy_rejects_unexpected_arguments() -> None:
     assert report.results[0].tool_selection_correct is True
     assert report.results[0].arguments_correct is False
     assert report.results[0].failures == ("argument_accuracy",)
+
+
+async def test_explicit_empty_tool_trajectory_rejects_an_unexpected_call() -> None:
+    result = make_result(
+        content="done",
+        stop_reason=StopReason.COMPLETED,
+        messages=(Message(role="user", content="unexpected-tool"),),
+        model_tool_calls=(
+            ToolCall(
+                id="unexpected-call",
+                name="query_order_status",
+                arguments={"order_id": "O1001"},
+            ),
+        ),
+        model_turn_count=1,
+    )
+    case = EvalCase(
+        case_id="unexpected-tool",
+        question="unexpected-tool",
+        context=make_context(),
+        limits=make_limits(),
+        expected_tool_calls=(),
+        max_turns=1,
+    )
+
+    report = await evaluate_cases(
+        [case], FakeEvaluationApplication({"unexpected-tool": result})
+    )
+
+    assert report.results[0].tool_selection_correct is False
+    assert report.results[0].arguments_correct is False
+    assert report.results[0].failures == ("tool_selection", "argument_accuracy")
+
+
+async def test_tool_trajectory_requires_exact_call_order_and_arguments() -> None:
+    result = make_result(
+        content="done",
+        stop_reason=StopReason.COMPLETED,
+        messages=(Message(role="user", content="ordered-tools"),),
+        model_tool_calls=(
+            ToolCall(id="call-a", name="search", arguments={"query": "leave"}),
+            ToolCall(
+                id="call-b",
+                name="query_order_status",
+                arguments={"order_id": "O1001"},
+            ),
+        ),
+        model_turn_count=2,
+    )
+    case = EvalCase(
+        case_id="ordered-tools",
+        question="ordered-tools",
+        context=make_context(),
+        limits=make_limits(),
+        expected_tool_calls=(
+            {"name": "query_order_status", "arguments": {"order_id": "O1001"}},
+            {"name": "search", "arguments": {"query": "leave"}},
+        ),
+        max_turns=2,
+    )
+
+    report = await evaluate_cases(
+        [case], FakeEvaluationApplication({"ordered-tools": result})
+    )
+
+    assert report.results[0].tool_selection_correct is False
+    assert report.results[0].arguments_correct is False
 
 
 async def test_eval_argument_accuracy_requires_canonical_nested_json() -> None:
@@ -272,10 +352,17 @@ async def test_eval_argument_accuracy_requires_canonical_nested_json() -> None:
         question="canonical-arguments",
         context=make_context(),
         limits=make_limits(),
-        expected_tool_name="query_order_status",
-        expected_tool_arguments={
-            "filters": {"include_archived": True, "order_ids": ["O1001"]},
-        },
+        expected_tool_calls=(
+            {
+                "name": "query_order_status",
+                "arguments": {
+                    "filters": {
+                        "include_archived": True,
+                        "order_ids": ["O1001"],
+                    },
+                },
+            },
+        ),
         max_turns=1,
     )
 
@@ -310,12 +397,14 @@ async def test_report_serialization_and_case_order_are_stable() -> None:
             question="question-b",
             context=make_context(),
             limits=make_limits(),
+            expected_tool_calls=(),
         ),
         EvalCase(
             case_id="a",
             question="question-a",
             context=make_context(),
             limits=make_limits(),
+            expected_tool_calls=(),
         ),
     ]
     app = FakeEvaluationApplication(
@@ -350,8 +439,9 @@ async def test_claimed_tool_result_without_model_call_evidence_cannot_pass() -> 
         question="claimed",
         context=make_context(),
         limits=make_limits(),
-        expected_tool_name="query_order_status",
-        expected_tool_arguments={"order_id": "O1001"},
+        expected_tool_calls=(
+            {"name": "query_order_status", "arguments": {"order_id": "O1001"}},
+        ),
     )
 
     report = await evaluate_cases(
@@ -389,8 +479,9 @@ async def test_non_echoing_tool_result_scores_from_model_call_evidence() -> None
         question="non-echoing",
         context=make_context(),
         limits=make_limits(),
-        expected_tool_name="query_order_status",
-        expected_tool_arguments={"order_id": "O1001"},
+        expected_tool_calls=(
+            {"name": "query_order_status", "arguments": {"order_id": "O1001"}},
+        ),
         max_turns=1,
     )
 
@@ -403,7 +494,7 @@ async def test_non_echoing_tool_result_scores_from_model_call_evidence() -> None
     assert report.argument_accuracy == 1.0
 
 
-async def test_empty_eval_categories_serialize_as_null() -> None:
+async def test_explicit_empty_trajectory_is_scored_and_optional_security_is_null() -> None:
     result = make_result(
         content="ok",
         stop_reason=StopReason.COMPLETED,
@@ -415,6 +506,7 @@ async def test_empty_eval_categories_serialize_as_null() -> None:
         question="plain",
         context=make_context(),
         limits=make_limits(),
+        expected_tool_calls=(),
         max_turns=3,
     )
 
@@ -422,12 +514,12 @@ async def test_empty_eval_categories_serialize_as_null() -> None:
     payload = json.loads(report.to_json())
 
     assert report.task_success_rate == 1.0
-    assert report.tool_selection_accuracy is None
-    assert report.argument_accuracy is None
+    assert report.tool_selection_accuracy == 1.0
+    assert report.argument_accuracy == 1.0
     assert report.unauthorized_action_block_rate is None
     assert report.average_turn_count == 3.0
-    assert payload["tool_selection_accuracy"] is None
-    assert payload["argument_accuracy"] is None
+    assert payload["tool_selection_accuracy"] == 1.0
+    assert payload["argument_accuracy"] == 1.0
     assert payload["unauthorized_action_block_rate"] is None
 
 

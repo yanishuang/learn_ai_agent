@@ -182,7 +182,7 @@ secrets 进入专用 secret manager，不进入仓库、镜像、prompt、trace 
 
 ## 学员实验
 
-Task 11 可将实验落到 `labs/chapter-13/`；该目录不在当前提交中。当前先提交设计与测试：
+本章没有单独的 Core lab 目录；当前交付是基于现有 API run/events 合同的产品化设计与学习者新增测试：
 
 1. 写六状态转换表和每条非法转换的 contract test。
 2. 为事件定义 versioned schema，测试 sequence、终态、重复、gap 与 `Last-Event-ID`。

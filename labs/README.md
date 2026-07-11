@@ -1,6 +1,6 @@
 # Labs
 
-所有命令默认从仓库根目录执行。Core 使用 `reference-implementation/` 的确定性 Fake Model、本地内存组件和 stdio MCP；不会发起模型网络请求，也不需要 API key。先按 [参考实现 README](../reference-implementation/README.md) 完成一次 `uv sync --group dev --extra live`。
+所有命令默认从仓库根目录执行。Core 使用 `reference-implementation/` 的确定性 Fake Model、本地内存组件和 stdio MCP；不会发起模型网络请求，也不需要 API key。先按 [参考实现 README](../reference-implementation/README.md) 完成 `uv lock --check` 与一次 `uv sync --frozen --group dev --extra live`。
 
 | Lab | 主题 | 默认离线验收 |
 | --- | --- | --- |

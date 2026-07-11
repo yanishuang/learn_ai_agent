@@ -1,7 +1,7 @@
 # 第 8 章：Workflow 与持久化执行
 
 更新时间：2026-07-10
-建议学习时间：5-7 天  
+建议学习时间：5-7 天
 本章产出：一个版本化、可暂停审批、可恢复、可取消、可超时且有幂等冲突检查的离线研究 Workflow；以及一份生产持久化、重试和副作用提交设计。
 
 ## 本章定位
@@ -372,7 +372,7 @@ Workflow 的 checkpoint 应放在业务语义稳定的位置：
 
 ## 学员实验
 
-Task 11 计划创建本章实验目录 `labs/chapter-08/`；该目录在本次 Task 5 提交中尚未创建，因此不把它写成当前可点击链接，也不宣称已有可运行 lab README。
+按 [Lab 08：可恢复 Workflow](../labs/chapter-08/README.md) 完成本章实验，保存 waiting/approval/resume、payload hash、幂等冲突、timeout 与 cancellation 证据。
 
 实验任务：
 

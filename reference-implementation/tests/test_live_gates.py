@@ -4,14 +4,21 @@ import pytest
 from pydantic import BaseModel
 
 from agent_course.agents.openai_agents import OpenAIAgentsRunner
+from agent_course.agents.guardrails import DefaultGuardrail
+from agent_course.agents.runner import BoundedAgentRunner
 from agent_course.core import (
     Message,
     ModelContinuation,
+    RunContext,
+    RunLimits,
     StopReason,
     ToolDefinition,
 )
 from agent_course.models.base import LiveConfigurationError
 from agent_course.models.openai_responses import OpenAIResponsesGateway
+from agent_course.observability.traces import InMemoryTraceSink
+from agent_course.tools.orders import QueryOrderStatusTool
+from agent_course.tools.registry import ToolRegistry
 
 
 LIVE_ENVIRONMENT = {
@@ -49,6 +56,7 @@ class NoNetworkResponses:
         self.create_calls.append(kwargs)
         return SimpleNamespace(
             id="response-1",
+            status="completed",
             output=[
                 SimpleNamespace(
                     type="function_call",
@@ -63,6 +71,8 @@ class NoNetworkResponses:
                 output_tokens=7,
                 total_tokens=18,
             ),
+            incomplete_details=None,
+            error=None,
         )
 
     async def parse(self, **kwargs: object) -> SimpleNamespace:
@@ -199,6 +209,7 @@ async def test_responses_gateway_runs_injected_two_turn_tool_exchange(
                 [
                     SimpleNamespace(
                         id="response-tool-call",
+                        status="completed",
                         output=[
                             SimpleNamespace(
                                 type="function_call",
@@ -209,12 +220,17 @@ async def test_responses_gateway_runs_injected_two_turn_tool_exchange(
                         ],
                         output_text="",
                         usage=None,
+                        incomplete_details=None,
+                        error=None,
                     ),
                     SimpleNamespace(
                         id="response-complete",
+                        status="completed",
                         output=[],
                         output_text="Order O1001 is shipped.",
                         usage=None,
+                        incomplete_details=None,
+                        error=None,
                     ),
                 ]
             )
@@ -272,6 +288,151 @@ async def test_responses_gateway_runs_injected_two_turn_tool_exchange(
             "previous_response_id": "response-tool-call",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_bounded_runner_sends_remaining_allowance_to_every_responses_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_live_environment(monkeypatch)
+
+    class BudgetedResponses:
+        def __init__(self) -> None:
+            self.create_calls: list[dict[str, object]] = []
+            self.responses = iter(
+                [
+                    SimpleNamespace(
+                        id="response-budget-tool",
+                        status="completed",
+                        output=[
+                            SimpleNamespace(
+                                type="function_call",
+                                call_id="call-budget-order",
+                                name="query_order_status",
+                                arguments='{"order_id":"O1001"}',
+                            )
+                        ],
+                        output_text="",
+                        usage=SimpleNamespace(
+                            input_tokens=5,
+                            output_tokens=7,
+                            total_tokens=12,
+                        ),
+                        incomplete_details=None,
+                        error=None,
+                    ),
+                    SimpleNamespace(
+                        id="response-budget-complete",
+                        status="completed",
+                        output=[],
+                        output_text="Order O1001 is shipped.",
+                        usage=SimpleNamespace(
+                            input_tokens=8,
+                            output_tokens=3,
+                            total_tokens=11,
+                        ),
+                        incomplete_details=None,
+                        error=None,
+                    ),
+                ]
+            )
+
+        async def create(self, **kwargs: object) -> SimpleNamespace:
+            self.create_calls.append(kwargs)
+            return next(self.responses)
+
+    responses = BudgetedResponses()
+    runner = BoundedAgentRunner(
+        model=OpenAIResponsesGateway.from_environment(
+            client=SimpleNamespace(responses=responses)
+        ),
+        tools=ToolRegistry([QueryOrderStatusTool()]),
+        guardrail=DefaultGuardrail(),
+        traces=InMemoryTraceSink(),
+    )
+
+    result = await runner.run(
+        "Order O1001",
+        RunContext(
+            user_id="live-test-user",
+            tenant_id="tenant-1",
+            request_id="live-budget-request",
+            permissions=frozenset({"orders:read"}),
+        ),
+        RunLimits(
+            max_turns=3,
+            max_tool_calls=2,
+            max_output_tokens=10,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.stop_reason is StopReason.COMPLETED
+    assert [call["max_output_tokens"] for call in responses.create_calls] == [10, 3]
+
+
+@pytest.mark.parametrize(
+    ("response_status", "incomplete_reason", "error_code", "expected_reason"),
+    [
+        ("incomplete", "max_output_tokens", None, "max_output_tokens"),
+        ("incomplete", "content_filter", None, "content_filter"),
+        ("incomplete", None, None, "model_incomplete"),
+        ("failed", None, "server_error", "model_error"),
+        ("failed", None, "bio_policy", "content_filter"),
+        ("cancelled", None, None, "cancelled"),
+        ("in_progress", None, None, "model_incomplete"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_responses_gateway_maps_non_success_statuses_to_typed_stop_reasons(
+    monkeypatch: pytest.MonkeyPatch,
+    response_status: str,
+    incomplete_reason: str | None,
+    error_code: str | None,
+    expected_reason: str,
+) -> None:
+    set_live_environment(monkeypatch)
+    response = SimpleNamespace(
+        id="response-terminal-status",
+        status=response_status,
+        output=[
+            SimpleNamespace(
+                type="function_call",
+                call_id="must-not-execute",
+                name="query_order_status",
+                arguments='{"order_id":"O1001"}',
+            )
+        ],
+        output_text="partial output",
+        usage=None,
+        incomplete_details=(
+            SimpleNamespace(reason=incomplete_reason)
+            if response_status == "incomplete"
+            else None
+        ),
+        error=(
+            SimpleNamespace(code=error_code, message="sanitized by boundary")
+            if error_code is not None
+            else None
+        ),
+    )
+
+    async def create(**kwargs: object) -> SimpleNamespace:
+        del kwargs
+        return response
+
+    gateway = OpenAIResponsesGateway.from_environment(
+        client=SimpleNamespace(responses=SimpleNamespace(create=create))
+    )
+
+    step = await gateway.next_step(
+        messages=[Message(role="user", content="Order O1001")],
+        tools=[ORDER_TOOL],
+    )
+
+    assert isinstance(step.stop_reason, StopReason)
+    assert step.stop_reason.value == expected_reason
+    assert step.tool_calls == ()
 
 
 @pytest.mark.asyncio

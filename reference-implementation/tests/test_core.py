@@ -132,9 +132,12 @@ def test_model_gateway_signature_is_async_and_stable() -> None:
     assert annotations["messages"] == list[Message]
     assert annotations["tools"] == list[ToolDefinition]
     assert annotations["continuation"] == ModelContinuation | None
+    assert annotations["max_output_tokens"] == int | None
     assert annotations["return"] is ModelStep
     assert parameters["continuation"].kind is Parameter.KEYWORD_ONLY
     assert parameters["continuation"].default is None
+    assert parameters["max_output_tokens"].kind is Parameter.KEYWORD_ONLY
+    assert parameters["max_output_tokens"].default is None
 
 
 @pytest.mark.parametrize("field", ["provider", "token"])

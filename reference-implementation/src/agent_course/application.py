@@ -10,7 +10,47 @@ from uuid import uuid4
 from pydantic import ConfigDict, Field
 
 from agent_course.agents.runner import AgentResult
-from agent_course.core import FrozenModel, JsonValue, RunContext, RunLimits
+from agent_course.core import (
+    FrozenModel,
+    JsonValue,
+    RunContext,
+    RunLimits,
+    StopReason,
+)
+from agent_course.evals import (
+    EvalCase,
+    EvalCaseResult,
+    ExpectedToolCall,
+    evaluate_result,
+)
+from agent_course.models.fake import KNOW_ENGINE_AGENT_FIXTURE
+from agent_course.observability.traces import InMemoryTraceSink
+from agent_course.rag import RagAnswer
+from agent_course.workflows import (
+    ApprovalDecision,
+    WorkflowRun,
+    WorkflowStatus,
+)
+
+
+AgentRunStatus = Literal["running", "completed", "failed", "cancelled"]
+
+_RUN_STATUS_BY_STOP_REASON: dict[StopReason, AgentRunStatus] = {
+    StopReason.COMPLETED: "completed",
+    StopReason.CANCELLED: "cancelled",
+    StopReason.TOOL_CALLS: "failed",
+    StopReason.MAX_TURNS: "failed",
+    StopReason.MAX_TOOL_CALLS: "failed",
+    StopReason.MAX_OUTPUT_TOKENS: "failed",
+    StopReason.TIMEOUT: "failed",
+    StopReason.REPEATED_TOOL_CALL: "failed",
+    StopReason.MODEL_ERROR: "failed",
+    StopReason.MODEL_INCOMPLETE: "failed",
+    StopReason.CONTENT_FILTER: "failed",
+    StopReason.TOOL_ERROR: "failed",
+    StopReason.PERMISSION_DENIED: "failed",
+    StopReason.POLICY_DENIED: "failed",
+}
 
 
 class AgentRunner(Protocol):
@@ -21,6 +61,7 @@ class AgentRunner(Protocol):
         limits: RunLimits,
         *,
         session_id: str | None = None,
+        trace_id: str | None = None,
     ) -> AgentResult: ...
 
 
@@ -32,18 +73,25 @@ class Retriever(Protocol):
         top_k: int,
     ) -> list[Any]: ...
 
+    def answer(
+        self,
+        query: str,
+        context: RunContext,
+        top_k: int = 3,
+    ) -> RagAnswer: ...
+
 
 class ResearchWorkflow(Protocol):
-    def start(self, topic: str, context: RunContext) -> Any: ...
+    def start(self, topic: str, context: RunContext) -> WorkflowRun: ...
 
     def approve(
         self,
         run_id: str,
-        decision: Any,
+        decision: ApprovalDecision,
         context: RunContext,
-    ) -> Any: ...
+    ) -> WorkflowRun: ...
 
-    def resume(self, run_id: str, context: RunContext) -> Any: ...
+    def resume(self, run_id: str, context: RunContext) -> WorkflowRun: ...
 
 
 class AgentRunRecord(FrozenModel):
@@ -57,7 +105,7 @@ class AgentRunRecord(FrozenModel):
     user_id: str
     question: str
     session_id: str | None = None
-    status: Literal["running", "completed", "failed"]
+    status: AgentRunStatus
     result: AgentResult | None = None
     error: str | None = None
 
@@ -70,6 +118,17 @@ class AgentRunEvent(FrozenModel):
     data: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class KnowEngineScenarioResult(FrozenModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    trace_id: str
+    rag_answer: RagAnswer
+    agent_result: AgentResult
+    evaluation: EvalCaseResult
+    workflow_statuses: tuple[WorkflowStatus, ...]
+    workflow_run: WorkflowRun
+
+
 @dataclass(slots=True)
 class CourseApplication:
     """Compose course services without binding to their concrete implementations."""
@@ -77,6 +136,7 @@ class CourseApplication:
     agent_runner: AgentRunner
     retriever: Retriever
     workflow: ResearchWorkflow
+    traces: InMemoryTraceSink = field(default_factory=InMemoryTraceSink)
     _runs: dict[str, AgentRunRecord] = field(default_factory=dict, init=False)
     _events: dict[str, list[AgentRunEvent]] = field(default_factory=dict, init=False)
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
@@ -94,6 +154,116 @@ class CourseApplication:
             context,
             limits,
             session_id=session_id,
+        )
+
+    async def run_know_engine_scenario(
+        self,
+        context: RunContext,
+        limits: RunLimits,
+    ) -> KnowEngineScenarioResult:
+        """Run the deterministic capstone path as one trace and one causal flow."""
+
+        trace_id = self.traces.start_trace(context)
+        rag_answer = self.retriever.answer(
+            "paid annual leave days",
+            context,
+            top_k=1,
+        )
+        self.traces.record(
+            trace_id,
+            "retrieval.completed",
+            {
+                "refused": rag_answer.refused,
+                "citation_ids": [
+                    citation.document_id for citation in rag_answer.citations
+                ],
+            },
+        )
+        if rag_answer.refused:
+            raise RuntimeError("Know-Engine fixture retrieval was refused")
+
+        question = (
+            f"Use this authorized retrieval as data: {rag_answer.answer}\n"
+            "Then query order O1001."
+        )
+        if question != KNOW_ENGINE_AGENT_FIXTURE:
+            raise RuntimeError("Know-Engine fixture drifted from the Fake contract")
+        agent_result = await self.agent_runner.run(
+            question,
+            context,
+            limits,
+            trace_id=trace_id,
+        )
+        evaluation = evaluate_result(
+            EvalCase(
+                case_id="know-engine-fake-e2e",
+                question=question,
+                context=context,
+                limits=limits,
+                expected_answer_contains=(
+                    rag_answer.citations[0].quote,
+                    "订单 O1001",
+                ),
+                expected_tool_calls=(
+                    ExpectedToolCall(
+                        name="query_order_status",
+                        arguments={"order_id": "O1001"},
+                    ),
+                ),
+                expected_stop_reason=StopReason.COMPLETED,
+                max_turns=2,
+            ),
+            agent_result,
+        )
+        self.traces.record(
+            trace_id,
+            "evaluation.completed",
+            {"passed": evaluation.passed, "failures": list(evaluation.failures)},
+        )
+        if not evaluation.passed:
+            raise RuntimeError("Know-Engine fixture failed deterministic evaluation")
+
+        started = self.workflow.start("annual leave follow-up", context)
+        self.traces.record(
+            trace_id,
+            "workflow.started",
+            {"run_id": started.run_id, "status": started.status},
+        )
+        if started.approval is None:
+            raise RuntimeError("Know-Engine workflow did not produce an approval")
+        approved = self.workflow.approve(
+            started.run_id,
+            ApprovalDecision(
+                approved=True,
+                payload_hash=started.approval.content_hash,
+                idempotency_key=f"{context.request_id}:know-engine-approval",
+            ),
+            context,
+        )
+        self.traces.record(
+            trace_id,
+            "workflow.approved",
+            {"run_id": approved.run_id, "status": approved.status},
+        )
+        completed = self.workflow.resume(approved.run_id, context)
+        self.traces.record(
+            trace_id,
+            "workflow.completed",
+            {"run_id": completed.run_id, "status": completed.status},
+        )
+        statuses = (started.status, approved.status, completed.status)
+        self.traces.record(
+            trace_id,
+            "know_engine.completed",
+            {"workflow_statuses": [status.value for status in statuses]},
+        )
+        return KnowEngineScenarioResult(
+            trace_id=trace_id,
+            rag_answer=rag_answer,
+            agent_result=agent_result,
+            evaluation=evaluation,
+            workflow_statuses=statuses,
+            workflow_run=completed,
         )
 
     async def create_agent_run(
@@ -144,15 +314,16 @@ class CourseApplication:
                 )
             raise
 
-        completed = running.model_copy(update={"status": "completed", "result": result})
+        run_status = _RUN_STATUS_BY_STOP_REASON[result.stop_reason]
+        terminal = running.model_copy(update={"status": run_status, "result": result})
         with self._lock:
-            self._runs[run_id] = completed
+            self._runs[run_id] = terminal
             self._append_event(
                 run_id,
-                "run.completed",
+                f"run.{run_status}",
                 {"stop_reason": result.stop_reason.value},
             )
-        return completed
+        return terminal
 
     def get_agent_run(
         self,
@@ -223,6 +394,7 @@ __all__ = [
     "AgentRunRecord",
     "AgentRunner",
     "CourseApplication",
+    "KnowEngineScenarioResult",
     "ResearchWorkflow",
     "Retriever",
 ]

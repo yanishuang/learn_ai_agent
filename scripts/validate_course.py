@@ -12,6 +12,20 @@ MARKDOWN_LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 FENCE_PATTERN = re.compile(r"^\s*(`{3,}|~{3,})")
 MARKDOWN_DIRECTORIES = ("chapters", "docs", "teaching", "labs")
 MATURITY_LABELS = {"stable", "preview", "experimental", "rc"}
+H2_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
+TEACHING_SECTIONS = (
+    ("prerequisites", ("前置知识", "学前准备", "本章先学什么")),
+    ("learning outcomes", ("学习目标",)),
+    ("core knowledge", ("核心知识",)),
+    ("instructor demonstration", ("教师演示",)),
+    ("learner lab", ("学员实验",)),
+    ("failure injection", ("失败注入与排错",)),
+    ("automated verification", ("自动验证",)),
+    ("assignment and rubric", ("作业与评分",)),
+    ("completion levels", ("Core / Advanced / Production 完成标准",)),
+    ("current sources", ("本章资料", "本章学习资料")),
+    ("recap", ("复盘模板",)),
+)
 
 
 def validate_repository(root: Path, *, require_course_structure: bool = True) -> list[str]:
@@ -169,7 +183,63 @@ def _validate_course_manifest(root: Path) -> list[str]:
             errors.append(
                 f"{chapter_path.as_posix()}: expected top-level heading {expected_heading}"
             )
+        else:
+            errors.extend(
+                _validate_teaching_contract(chapter_path.as_posix(), headings)
+            )
     return errors
+
+
+def _validate_teaching_contract(relative_path: str, lines: list[str]) -> list[str]:
+    errors: list[str] = []
+    section_indexes: dict[str, int] = {}
+    for label, aliases in TEACHING_SECTIONS:
+        index = _find_h2_section(lines, aliases)
+        if index is None:
+            errors.append(f"{relative_path}: missing teaching section {label}")
+        else:
+            section_indexes[label] = index
+
+    assignment_index = section_indexes.get("assignment and rubric")
+    if assignment_index is not None:
+        assignment = _h2_section_body(lines, assignment_index)
+        has_scoring = any(
+            "分值" in line
+            or "权重" in line
+            or re.search(r"(?:总分\s*)?100\s*分", line)
+            for line in assignment
+        )
+        if not has_scoring:
+            errors.append(
+                f"{relative_path}: assignment must include explicit scoring"
+            )
+
+    completion_index = section_indexes.get("completion levels")
+    if completion_index is not None:
+        completion = "\n".join(_h2_section_body(lines, completion_index))
+        if not all(level in completion for level in ("Core", "Advanced", "Production")):
+            errors.append(
+                f"{relative_path}: completion standards must distinguish "
+                "Core, Advanced, and Production"
+            )
+    return errors
+
+
+def _find_h2_section(lines: list[str], aliases: tuple[str, ...]) -> int | None:
+    for index, line in enumerate(lines):
+        match = H2_PATTERN.match(line)
+        if match and any(alias in match.group(1) for alias in aliases):
+            return index
+    return None
+
+
+def _h2_section_body(lines: list[str], heading_index: int) -> list[str]:
+    body: list[str] = []
+    for line in lines[heading_index + 1 :]:
+        if H2_PATTERN.match(line):
+            break
+        body.append(line)
+    return body
 
 
 def _is_within_root(path: Path, resolved_root: Path) -> bool:

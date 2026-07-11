@@ -9,9 +9,10 @@ newer and `uv` are required.
 Run these exact commands from `reference-implementation/`:
 
 ```bash
-uv sync --group dev --extra live
-uv run --group dev --extra live pytest -q
-uv run --group dev --extra live ruff check .
+uv lock --check
+uv sync --frozen --group dev --extra live
+uv run --frozen --no-sync --group dev --extra live pytest -q -m "not live"
+uv run --frozen --no-sync --group dev --extra live ruff check .
 ```
 
 These tests make no model network requests and require no API key. The live
@@ -78,6 +79,23 @@ checks that every object schema disables additional properties, requires every
 declared property, and applies the same rules recursively through nested object
 properties and array items. Invalid schemas are rejected unchanged with a
 JSON-path diagnostic.
+
+The bounded runner passes its remaining output-token allowance into every
+Responses request as `max_output_tokens`. The adapter inspects
+`response.status`, `incomplete_details`, and policy error codes; incomplete,
+failed, filtered, and cancelled responses return typed non-success stop reasons
+and cannot execute tool calls carried by that response.
+
+## Integrated offline path
+
+The default composition supplies the real in-memory RAG and Workflow
+components. `CourseApplication.run_know_engine_scenario()` executes one
+permission-filtered retrieval, an exact Fake model/tool loop, deterministic
+trajectory evaluation, and an approval-bound Workflow on a shared trace.
+
+The MCP stdio client requires negotiated protocol `2025-11-25`, an exact tool
+allowlist, pinned input/output schema hashes, and local strict validation of
+`structuredContent` before returning an exchange.
 
 `OpenAIAgentsRunner` uses the OpenAI Agents SDK. The SDK owns the run lifecycle
 through `Agent` and `Runner.run`; the reference wrapper selects the configured

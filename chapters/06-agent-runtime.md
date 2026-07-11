@@ -1,7 +1,7 @@
 # 第 6 章：单 Agent Runtime：执行循环、工具、记忆与 Trace
 
 更新时间：2026-07-10
-建议学习时间：5-7 天  
+建议学习时间：5-7 天
 本章产出：一个有显式预算、可信身份边界、会话隔离、停止原因和脱敏轨迹的单 Agent；以及一份把高风险动作交给可恢复审批流程的设计说明。
 
 ## 本章定位
@@ -257,7 +257,7 @@ async def run_sdk_owned() -> object:
 
 ## 学员实验
 
-Task 11 计划创建本章实验目录 `labs/chapter-06/`；该目录在本次 Task 5 提交中尚未创建，因此这里记录的是准确的后续路径，不宣称当前已经可以从该目录运行 README。
+按 [Lab 06：有边界的单 Agent Runtime](../labs/chapter-06/README.md) 完成本章实验。该实验直接运行当前 Fake runner、trajectory evaluator、session 与 trace 测试。
 
 实验任务：
 
@@ -304,7 +304,7 @@ uv run --group dev --extra live pytest tests/test_agent_runner.py tests/test_eva
 - `StopReason` 拼写与 `core.py` 一致；
 - 主示例构造了真实 `RunLimits`；
 - 未把 SDK-owned wrapper 描述成支持本地 `RunLimits`；
-- `labs/chapter-06/` 只作为 Task 11 计划路径出现，没有失效 Markdown 链接。
+- Lab 06 的命令、预期 stop reason 和当前 runner/evaluator 合同一致。
 
 ## 作业与评分
 

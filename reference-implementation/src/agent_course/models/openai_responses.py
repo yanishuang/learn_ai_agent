@@ -45,6 +45,7 @@ class OpenAIResponsesGateway:
         tools: list[ToolDefinition],
         *,
         continuation: ModelContinuation | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelStep:
         request: dict[str, object] = {
             "model": self.model,
@@ -58,6 +59,10 @@ class OpenAIResponsesGateway:
                     f"{_CONTINUATION_PROVIDER!r}, got {continuation.provider!r}"
                 )
             request["previous_response_id"] = continuation.token
+        if max_output_tokens is not None:
+            if max_output_tokens <= 0:
+                raise ValueError("max_output_tokens must be greater than zero")
+            request["max_output_tokens"] = max_output_tokens
 
         response = await self._client.responses.create(
             **request,
@@ -67,10 +72,15 @@ class OpenAIResponsesGateway:
         if not isinstance(response_id, str) or not response_id.strip():
             raise ValueError("Responses API returned no usable response id")
 
-        tool_calls = tuple(
-            self._tool_call(item)
-            for item in response.output
-            if getattr(item, "type", None) == "function_call"
+        terminal_reason = self._non_success_stop_reason(response)
+        tool_calls = (
+            ()
+            if terminal_reason is not None
+            else tuple(
+                self._tool_call(item)
+                for item in response.output
+                if getattr(item, "type", None) == "function_call"
+            )
         )
         usage = getattr(response, "usage", None)
         model_usage = ModelUsage(
@@ -79,15 +89,45 @@ class OpenAIResponsesGateway:
             total_tokens=getattr(usage, "total_tokens", 0),
         )
         return ModelStep(
-            content=response.output_text or None,
+            content=(response.output_text or None) if terminal_reason is None else None,
             tool_calls=tool_calls,
             continuation=ModelContinuation(
                 provider=_CONTINUATION_PROVIDER,
                 token=response_id,
             ),
             usage=model_usage,
-            stop_reason=(StopReason.TOOL_CALLS if tool_calls else StopReason.COMPLETED),
+            stop_reason=(
+                terminal_reason
+                or (StopReason.TOOL_CALLS if tool_calls else StopReason.COMPLETED)
+            ),
         )
+
+    @staticmethod
+    def _non_success_stop_reason(response: object) -> StopReason | None:
+        status = getattr(response, "status", None)
+        if status == "completed":
+            return None
+        if status == "incomplete":
+            details = getattr(response, "incomplete_details", None)
+            reason = getattr(details, "reason", None)
+            if reason == "max_output_tokens":
+                return StopReason.MAX_OUTPUT_TOKENS
+            if reason == "content_filter":
+                return StopReason.CONTENT_FILTER
+            return StopReason.MODEL_INCOMPLETE
+        if status == "failed":
+            error = getattr(response, "error", None)
+            if getattr(error, "code", None) in {
+                "bio_policy",
+                "image_content_policy_violation",
+            }:
+                return StopReason.CONTENT_FILTER
+            return StopReason.MODEL_ERROR
+        if status == "cancelled":
+            return StopReason.CANCELLED
+        if status in {"queued", "in_progress"}:
+            return StopReason.MODEL_INCOMPLETE
+        return StopReason.MODEL_ERROR
 
     async def parse_structured(
         self,

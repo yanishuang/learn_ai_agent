@@ -35,6 +35,10 @@ notes/chapter-01-system-architecture.md
 notes/chapter-01-evidence.md
 ```
 
+## 核心知识
+
+本章核心知识由 1.3-1.11 节组成：先建立组合式全景，再用知识、动作、路径、状态和风险五轴选择最小可验证方案，并明确 RAG、Tools、Workflow、Agent、MCP 与多 Agent 的边界。
+
 ## 1.3 先建立组合式全景图
 
 AI Agent 不是一个替代所有架构的盒子。更实用的理解是：普通模型调用之上，可以按需要组合知识、动作、流程和开放决策能力；状态、权限、预算、审批和 trace 则由应用持续治理。
